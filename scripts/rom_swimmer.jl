@@ -121,16 +121,17 @@ end
 
 #Deforming NACA0012 Foild
 an = [0.2969, -0.126, -0.3516, 0.2843, -0.1036]
-yt(x_)  = T/0.2*(an[1]*x_^0.5 + an[2]*x_ + an[3]*x_^2 + an[4]*x_^3 + an[5]*x_^5)
+#   0.12/0.2*(0.2969*xb**0.5 - 0.126*xb - 0.3516*xb**2 + 0.2843*xb**3 - 0.1036*xb**4)
 T = 0.12 #thickness
+yt(x_)  = T/0.2*(an[1]*x_^0.5 + an[2]*x_ + an[3]*x_^2 + an[4]*x_^3 + an[5]*x_^4)
 #neutral x
-N = 51
+N = 7
 
-x = (1 .- cos.(LinRange(0, pi, (N+2 )÷2)))./2
+x = (1 .- cos.(LinRange(0, pi, (N+2)÷2)))/2.0
 foil = [[x[end:-1:1];  x[2:end]]'
-        [yt.(x[end:-1:1]);  -yt.(x[2:end])]']
+        [-yt.(x[end:-1:1]);  yt.(x[2:end])]']
 
-        yt.(x[end:-1:1])
+        # yt.(x[end:-1:1])
 foil_col = (foil[:,2:end] + foil[:,1:end-1])./2
 
 get_collocation(foil) = (foil[:,2:end] + foil[:,1:end-1])./2
@@ -190,7 +191,7 @@ function norms(foil)
     tx = dxdy[1,:]'./lengths
     ty = dxdy[2,:]'./lengths
     # tangents x,y normals x, y  lengths
-    return tx,-ty, ty, tx, lengths
+    return tx, ty, -ty, tx, lengths
 end  
 
 tx,ty, nx, ny, lengths = norms(foil)
@@ -214,58 +215,148 @@ begin
     quiver!(col[1,:], col[2,:], quiver=(nx[1:end],ny[1:end]),length=0.1)
 end  
 
-source_inf(x1, x2, z) = (x1*log(x1^2 + z^2) - x2*(log(x2^2 + z^2)) - 2*(x1-x2)
+source_inf(x1, x2, z) = (x1*log(x1^2 + z^2) - x2*log(x2^2 + z^2) - 2*(x1-x2)
                         + 2*z*(atan(z,x2) -atan(z,x1)))/(4π)
 doublet_inf(x1, x2, z) = -(atan(z,x2) - atan(z,x1))/(2π)
 
-
+tx,ty,nx,ny,ll = norms(foil)
 ##CHANGE THE PANEL FRAMES -endpnts are the sources, col are targets 
 x1 = zeros(N-1, N-1)
 x2 = zeros(N-1, N-1)
 y = zeros(N-1, N-1)
 txMat = repeat(tx,N-1,1)
 tyMat = repeat(ty,N-1,1)
-for i=1:N-1
-    x1[:,i] = (col[1,:] .- foil[1,i])
-    x2[:,i] = (col[2,:] .- foil[2,i])    
-end
-dx = x1
-dy = x2
+dx = repeat(foil_col[1,:],1,N-1) - repeat(foil[1,1:end-1]',N-1,1)
+dy = repeat(foil_col[2,:],1,N-1) - repeat(foil[2,1:end-1]',N-1,1)
+# for i=1:N-1
+#     x1[:,i] = (foil_col[1,:] .- foil[1,i])
+#     x2[:,i] = (foil_col[2,:] .- foil[2,i])    
+# end
+# dx = x1
+# dy = x2
 x1 = dx.*txMat + dy.*tyMat
-y = dx.* -tyMat+ dy.*txMat
+y =  dx.*-tyMat+ dy.*txMat
 
 x2 = x1 - repeat(sum(diff(foil,dims=2).*[tx;ty],dims=1),N-1,1)
+
+#Grabbed from python code
+#strictly for testing though y here and z there are off 
+pyx1 = [[ 0.12596995, -0.12568028, -0.59794013,  0.84768749,  0.6282324 ,
+0.12983482]
+[ 0.50176151,  0.25039739, -0.23996686,  0.47597968,  0.25550035,
+-0.23859873]
+[ 0.87194163,  0.62392359,  0.12848079,  0.11474624, -0.11978317,
+-0.61264372]
+[ 0.86458362,  0.62057795,  0.14221534,  0.12848079, -0.1231288 ,
+-0.62000172]
+[ 0.49053864,  0.24529443, -0.2190181 ,  0.49692843,  0.25039739,
+-0.2498216 ]
+[ 0.12210508, -0.12743761, -0.59072591,  0.8549017 ,  0.62647507,
+0.12596995]] 
+pyx1 = reshape(pyx1,(6,6))
+pyx1' .-x1
+
+py_z = [ 1.66533454e-17, -3.12043904e-02, -5.94075000e-02, -0.00000000e+00,
+5.94075000e-02,  3.12043904e-02, -1.66533454e-17]
+
+py_z .- foil[2,:]
+py_foil = [1.00000000e+00  7.50000000e-01  2.50000000e-01 0.00000000e+00  2.50000000e-01   7.50000000e-01  1.00000000e+00;
+           1.66533454e-17 -3.12043904e-02 -5.94075000e-02 -0.00000000e+00  5.94075000e-02  3.12043904e-02 -1.66533454e-17]
+
+py_col = get_collocation(py_foil)           
 
 function panel_frame(target,source)
     _, Ns = size(source)
     _, Nt = size(target)
-    Ns -=1 #TE accomodations
+    Ns -= 1 #TE accomodations
     x1 = zeros(Ns, Nt)
     x2 = zeros(Ns, Nt)
     y = zeros(Ns, Nt)
-    nx,tx,tx,ty,lens = norms(source)
+    tx,ty,nx,ny,lens = norms(source)
     txMat = repeat(tx, Nt, 1)
     tyMat = repeat(ty, Nt, 1)
-    for i=1:Nt
-        x1[:,i] = (target[1,i] .- source[1,1:end-1])
-        x2[:,i] = (target[2,i] .- source[2,1:end-1])    
-    end
-    dx = x1
-    dy = x2
+    dx = repeat(target[1,:],1,Ns) - repeat(source[1,1:end-1]',Nt,1)
+    dy = repeat(target[2,:],1,Ns) - repeat(source[2,1:end-1]',Nt,1)
     x1 = dx.*txMat + dy.*tyMat
-    y = dx.* -tyMat+ dy.*txMat
+    y  = -dx.* tyMat + dy.*txMat
     x2 = x1 - repeat(sum(diff(source,dims=2).*[tx;ty],dims=1),Nt,1)
     return x1, x2, y
 
 end
 
+x1,x2,y  = panel_frame(py_col, py_foil)
 
-x1,x2,y = panel_frame(col,foil)
-doublet_inf.(x1,x2,y)
-plot(dx, st=:contourf)
-plot(dy, st=:contourf)
-plot(dx.^2 + dy.^2, st=:contourf)
+x1,x2,y = panel_frame(foil_col,foil)
+doubletMat = doublet_inf.(x1,x2,y)
+sourceMat = source_inf.(x1,x2,y)
+plot(x1, st=:contourf)
+plot(x2, st=:contourf)
+plot(y, st=:contourf)
 
 
 plot!(col[1,:], col[2,:], aspect_ratio=:equal, marker=:star,color=:red)
 quiver!(col[1,:], col[2,:], quiver=(nx[1:end],ny[1:end]),length=0.1)
+
+#define the edge off of the TE
+Uinf = 1. 
+Δt = 0.1
+#use this def to allow for implicit kutta in the future
+edge_vec = Uinf*Δt*[(tx[end] - tx[1])/2.,(ty[end] - ty[1])/2.]
+edge = [foil[:,end] foil[:,end] .+ edge_vec foil[:,end] .+ 2*edge_vec ] 
+
+plot(foil[1,:], foil[2,:], aspect_ratio=:equal, marker=:circle)
+plot!(edge[1,:],edge[2,:], aspect_ratio=:equal, marker=:star,color=:green)
+
+
+#figure this out
+abstract type Body end
+    
+
+mutable struct Foil <: Body
+    h  #heave or traveling wave function
+    N # number of elements
+    foil #coordinates in the Body Frame
+    μs #doublet strengths
+    edge
+    chord
+
+end
+
+mutable struct Flow
+    Δt #time-step
+    Uinf
+    ρ #fluid density
+    N #number of time steps
+end
+
+sigmas = sum([Uinf,0] .* [nx;ny], dims = 1)
+rhs = - sourceMat*sigmas'
+doubletMat\rhs
+#this all matches to now 
+
+#make the edge doublet work
+panel_frame(foil,edge)
+
+##CHANGE THE PANEL FRAMES -endpnts are the sources, col are targets 
+_, Ns = size(source)
+_, Nt = size(target)
+Ns -= 1 #TE accomodations
+x1 = zeros(Ns, Nt)
+x2 = zeros(Ns, Nt)
+y = zeros(Ns, Nt)
+tx,ty,nx,ny,lens = norms(source)
+txMat = repeat(tx, Nt, 1)
+tyMat = repeat(ty, Nt, 1)
+dx = repeat(target[1,:],1,Ns) - repeat(source[1,1:end-1]',Nt,1)
+dy = repeat(target[2,:],1,Ns) - repeat(source[2,1:end-1]',Nt,1)
+x1 = dx.*txMat + dy.*tyMat
+y  = -dx.* tyMat + dy.*txMat
+x2 = x1 - repeat(sum(diff(source,dims=2).*[tx;ty],dims=1),Nt,1)
+
+edgeInf = doublet_inf.(x1,x2,y)
+
+edgeMat = zeros(size(doubletMat))
+edgeMat[:,1] = -edgeInf[:,1]
+edgeMat[:,end] = edgeInf[:,1]
+A = doubletMat + edgeMat
+μ = A\rhs
