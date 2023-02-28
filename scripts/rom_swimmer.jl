@@ -22,6 +22,7 @@ requirements:
 P(Γ((x,y)(t))) we want to reduce Γ while still getting pressure along the body
 
 """
+"""
 #rows left right
 vort = [-1 1 
          0.5  -0.5]
@@ -70,17 +71,19 @@ plot(collect(xs),collect(ys), stream, st=:contourf,c=:redsblues)
 plot!(pos[1,:],pos[2,:],seriestype=:scatter, label="top")
 plot!(left[1,:],left[2,:],seriestype=:scatter,label="left")
 plot!(right[1,:],right[2,:],seriestype=:scatter,label="right")   
+"""
 
 a0 = 0.1
 a = [0.367,0.323,0.310]
 f = k = 1
-h(x,t) = a0*amp(x,a)*sin(2π*(k*x - f*t))
+
 amp(x,a) = a[1] + a[2]*x + a[3]*x^2
+h(x,f,k,t) = a0*amp(x,a)*sin(2π*(k*x - f*t))
+h(x,t) = f,k -> h(x,f,k,t)
+#no used
+# ang = x -> h(x,a)
 
-
-ang = x -> h(x,a)
-
-plot(h.(LinRange(0,1,64),0.0))
+plot(h.(LinRange(0,1,64),1.0,0.5,1.0))
 
 begin 
     n = 25
@@ -104,44 +107,148 @@ end
 
 
 
-begin 
-    n = 25
-    T = LinRange(0, 1, n)
+# begin 
+#     n = 25
+#     T = LinRange(0, 1, n)
     
-    anim = @animate for t in T
-        vorts = vort .* (sin(2π*t))/2.
-        @show vort
-        stream = streamfunction(sources,vorts,targets)
-        plot(collect(xs),collect(ys), stream, st=:contourf,c=:redsblues)        
-        plot!(left[1,:],left[2,:],seriestype=:scatter,label="")
-        plot!(right[1,:],right[2,:],seriestype=:scatter,label="")  
-    end
-    gif(anim,"simple.gif", fps=12)
+#     anim = @animate for t in T
+#         vorts = vort .* (sin(2π*t))/2.
+#         @show vort
+#         stream = streamfunction(sources,vorts,targets)
+#         plot(collect(xs),collect(ys), stream, st=:contourf,c=:redsblues)        
+#         plot!(left[1,:],left[2,:],seriestype=:scatter,label="")
+#         plot!(right[1,:],right[2,:],seriestype=:scatter,label="")  
+#     end
+#     gif(anim,"simple.gif", fps=12)
+# end
+
+#Deforming NACA0012 Foil
+function make_naca(N;chord=1,T=0.12)
+    # N = 7
+    an = [0.2969, -0.126, -0.3516, 0.2843, -0.1036]
+    # T = 0.12 #thickness
+    yt(x_)  = T/0.2*(an[1]*x_^0.5 + an[2]*x_ + an[3]*x_^2 + an[4]*x_^3 + an[5]*x_^4)
+    #neutral x
+    x = (1 .- cos.(LinRange(0, pi, (N+2)÷2)))/2.0
+    foil = [[x[end:-1:1];  x[2:end]]'
+            [-yt.(x[end:-1:1]);  yt.(x[2:end])]']
+
+            # yt.(x[end:-1:1])
+    # foil_col = (foil[:,2:end] + foil[:,1:end-1])./2
+    foil.*chord
 end
+function make_waveform(a0 = 0.1, a = [0.367,0.323,0.310] )
+    a0 = 0.1
+    a = [0.367,0.323,0.310]
+    f = k = 1
 
-#Deforming NACA0012 Foild
-an = [0.2969, -0.126, -0.3516, 0.2843, -0.1036]
-#   0.12/0.2*(0.2969*xb**0.5 - 0.126*xb - 0.3516*xb**2 + 0.2843*xb**3 - 0.1036*xb**4)
-T = 0.12 #thickness
-yt(x_)  = T/0.2*(an[1]*x_^0.5 + an[2]*x_ + an[3]*x_^2 + an[4]*x_^3 + an[5]*x_^4)
-#neutral x
-N = 7
-
-x = (1 .- cos.(LinRange(0, pi, (N+2)÷2)))/2.0
-foil = [[x[end:-1:1];  x[2:end]]'
-        [-yt.(x[end:-1:1]);  yt.(x[2:end])]']
-
-        # yt.(x[end:-1:1])
-foil_col = (foil[:,2:end] + foil[:,1:end-1])./2
-
+    amp(x,a) = a[1] + a[2]*x + a[3]*x^2
+    h(x,f,k,t) = a0*amp(x,a)*sin(2π*(k*x - f*t))
+    # h(x,t) = f,k -> h(x,f,k,t)
+    h
+end
+make_waveform()
 get_collocation(foil) = (foil[:,2:end] + foil[:,1:end-1])./2
 
-plot(foil[1,:], foil[2,:], aspect_ratio=:equal, marker=:circle)
-plot!(foil_col[1,:],foil_col[2,:], aspect_ratio=:equal, marker=:star,color=:red)
+# plot(foil[1,:], foil[2,:], aspect_ratio=:equal, marker=:circle)
+# plot!(foil_col[1,:],foil_col[2,:], aspect_ratio=:equal, marker=:star,color=:red)
 
 #traveling wave
 foil[2,:] .+ h.(foil[1,:],0)
 
+abstract type Body end
+    
+mutable struct FlowParams
+    Δt #time-step
+    Uinf
+    ρ #fluid density
+    N #number of time steps
+    n #current time step
+end
+mutable struct Foil <: Body
+    kine  #kinematics: heave or traveling wave function
+    f #wave freq
+    k # wave number
+    N # number of elements
+    _foil #coordinates in the Body Frame
+    foil  # Absolute fram
+    col  # collocation points
+    μs #doublet strengths
+    edge
+    chord
+    normals
+    tangents
+    panel_lengths
+end
+function norms(foil)
+    dxdy = diff(foil, dims=2)
+    lengths = sqrt.(sum(abs2,diff(foil,dims=2),dims=1))
+    tx = dxdy[1,:]'./lengths
+    ty = dxdy[2,:]'./lengths
+    # tangents x,y normals x, y  lengths
+    return [tx; ty], [-ty; tx], lengths
+end  
+
+source_inf(x1, x2, z) = (x1*log(x1^2 + z^2) - x2*log(x2^2 + z^2) - 2*(x1-x2)
+                        + 2*z*(atan(z,x2) -atan(z,x1)))/(4π)
+doublet_inf(x1, x2, z) = -(atan(z,x2) - atan(z,x1))/(2π)
+
+function panel_frame(target,source)
+    _, Ns = size(source)
+    _, Nt = size(target)
+    Ns -= 1 #TE accomodations
+    x1 = zeros(Ns, Nt)
+    x2 = zeros(Ns, Nt)
+    y = zeros(Ns, Nt)
+    tx,ty,nx,ny,lens = norms(source)
+    txMat = repeat(tx, Nt, 1)
+    tyMat = repeat(ty, Nt, 1)
+    dx = repeat(target[1,:],1,Ns) - repeat(source[1,1:end-1]',Nt,1)
+    dy = repeat(target[2,:],1,Ns) - repeat(source[2,1:end-1]',Nt,1)
+    x1 = dx.*txMat + dy.*tyMat
+    y  = -dx.* tyMat + dy.*txMat
+    x2 = x1 - repeat(sum(diff(source,dims=2).*[tx;ty],dims=1),Nt,1)
+    return x1, x2, y
+end
+
+function init_params()
+    N = 128
+    chord = 1.0
+    naca0012 = make_naca(N+1;chord=chord)
+    col = get_collocation(naca0012)
+    ang = make_waveform()
+    fp = FlowParams(0.01, 1, 1000., 100)
+    txty, nxny, ll = norms(naca0012)
+    edge_vec = fp.Uinf*fp.Δt*[(txty[1,end] - txty[1,1])/2.,(txty[2,end] - txty[2,1])/2.]
+    edge = [naca0012[:,end]  (naca0012[:,end] .+ edge_vec) (naca0012[:,end] .+ 2*edge_vec) ] 
+    Foil(ang,1,1,N,naca0012,naca0012,col,zeros(N-1),edge,1,txty,nxny,ll) , fp
+end
+
+foil, flow = init_params()
+
+function (foil::Foil)(fp::FlowParams) 
+    foil.foil += foil.h.(foil.foil,foil.f, foil.k, fp.n*fp.Δt)
+    fp.n += 1
+    
+end
+
+function panel_frame(target,source)
+    _, Ns = size(source)
+    _, Nt = size(target)
+    Ns -= 1 #TE accomodations
+    x1 = zeros(Ns, Nt)
+    x2 = zeros(Ns, Nt)
+    y = zeros(Ns, Nt)
+    ts,ns,lens = norms(source)
+    txMat = repeat(ts[1,:]', Nt, 1)
+    tyMat = repeat(ts[2,:]', Nt, 1)
+    dx = repeat(target[1,:],1,Ns) - repeat(source[1,1:end-1]',Nt,1)
+    dy = repeat(target[2,:],1,Ns) - repeat(source[2,1:end-1]',Nt,1)
+    x1 = dx.*txMat + dy.*tyMat
+    y  = -dx.* tyMat + dy.*txMat
+    x2 = x1 - repeat(sum(diff(source,dims=2).*ts,dims=1),Nt,1)
+    x1, x2, y
+end
 
 begin 
     n = 25
@@ -265,24 +372,7 @@ py_foil = [1.00000000e+00  7.50000000e-01  2.50000000e-01 0.00000000e+00  2.5000
 
 py_col = get_collocation(py_foil)           
 
-function panel_frame(target,source)
-    _, Ns = size(source)
-    _, Nt = size(target)
-    Ns -= 1 #TE accomodations
-    x1 = zeros(Ns, Nt)
-    x2 = zeros(Ns, Nt)
-    y = zeros(Ns, Nt)
-    tx,ty,nx,ny,lens = norms(source)
-    txMat = repeat(tx, Nt, 1)
-    tyMat = repeat(ty, Nt, 1)
-    dx = repeat(target[1,:],1,Ns) - repeat(source[1,1:end-1]',Nt,1)
-    dy = repeat(target[2,:],1,Ns) - repeat(source[2,1:end-1]',Nt,1)
-    x1 = dx.*txMat + dy.*tyMat
-    y  = -dx.* tyMat + dy.*txMat
-    x2 = x1 - repeat(sum(diff(source,dims=2).*[tx;ty],dims=1),Nt,1)
-    return x1, x2, y
 
-end
 
 x1,x2,y  = panel_frame(py_col, py_foil)
 
@@ -308,26 +398,6 @@ plot(foil[1,:], foil[2,:], aspect_ratio=:equal, marker=:circle)
 plot!(edge[1,:],edge[2,:], aspect_ratio=:equal, marker=:star,color=:green)
 
 
-#figure this out
-abstract type Body end
-    
-
-mutable struct Foil <: Body
-    h  #heave or traveling wave function
-    N # number of elements
-    foil #coordinates in the Body Frame
-    μs #doublet strengths
-    edge
-    chord
-
-end
-
-mutable struct Flow
-    Δt #time-step
-    Uinf
-    ρ #fluid density
-    N #number of time steps
-end
 
 sigmas = sum([Uinf,0] .* [nx;ny], dims = 1)
 rhs = - sourceMat*sigmas'
@@ -360,3 +430,22 @@ edgeMat[:,1] = -edgeInf[:,1]
 edgeMat[:,end] = edgeInf[:,1]
 A = doubletMat + edgeMat
 μ = A\rhs
+
+
+function make_infs(foil :: Foil)
+    x1,x2,y    = panel_frame(foil.col, foil.foil)
+    doubletMat = doublet_inf.(x1,x2,y)
+    sourceMat  = source_inf.(x1,x2,y)
+    x1,x2,y    = panel_frame(foil.col, foil.edge)
+    edgeInf    = doublet_inf.(x1,x2,y)
+    edgeMat    = zeros(size(doubletMat))
+    edgeMat[:,1] = -edgeInf[:,1]
+    edgeMat[:,end] = edgeInf[:,1]
+    A = doubletMat + edgeMat
+    σ = [flow.Uinf,0]'*foil.normals
+    A/σ
+end
+
+A = make_infs(foil)
+plot(A,marker =:circle)
+A[end]+A[1]
