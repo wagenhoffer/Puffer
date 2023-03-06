@@ -20,24 +20,72 @@ requirements:
 9. Emit a vortex at reg interval
 
 P(Γ((x,y)(t))) we want to reduce Γ while still getting pressure along the body
+
+"""
+"""
+#rows left right
+vort = [-1 1 
+         0.5  -0.5]
+# cols i, rows x y                  
+pos  = [0.0 0.0
+        0.5 0.0]  
+
+δ = 0.25
+θ = π/2.0
+θr = θ - π/2.0
+θl = θ + π/2.0  
+left = [(pos[1,:] .+ δ*cos(θl))'
+        (pos[2,:] .+ δ*sin(θl))']
+right = [(pos[1,:] .+ δ*cos(θr))'
+         (pos[2,:] .+ δ*sin(θr))']        
+
+sources = [left right]
+
+function streamfunction(sources,gammas,targets)
+    """
+    """
+    pot = zeros((size(targets[1])...))
+
+    for i in 1:size(sources)[2]
+
+        dx = targets[1] .- sources[1,i]
+        dy = targets[2] .- sources[2,i]
+        @. pot += gammas[i] *log(sqrt(dx^2+dy^2))            
+    end
+    pot./(2π)
+end
+
+
+xs = LinRange(-2,2,31)
+ys = LinRange(-2,2,31)
+
+X = repeat(reshape(xs, 1, :), length(ys), 1)
+Y = repeat(ys, 1, length(xs))
+targets = [X,Y]
+
+stream = streamfunction(sources,vort, targets)
+
+
+
+plot(collect(xs),collect(ys), stream, st=:contourf,c=:redsblues)
+plot!(pos[1,:],pos[2,:],seriestype=:scatter, label="top")
+plot!(left[1,:],left[2,:],seriestype=:scatter,label="left")
+plot!(right[1,:],right[2,:],seriestype=:scatter,label="right")   
 """
 
-# %%
 a0 = 0.1
 a = [0.367,0.323,0.310]
 f = k = 1
 
 amp(x,a) = a[1] + a[2]*x + a[3]*x^2
-h(x,t,f,k) = a0*amp(x,a)*sin(2π*(k*x - f*t))
-h(x,t) = h(x,t,f,k)
+h(x,f,k,t) = a0*amp(x,a)*sin(2π*(k*x - f*t))
+h(x,t) = f,k -> h(x,f,k,t)
 #no used
 # ang = x -> h(x,a)
 
-# %%
-
 plot(h.(LinRange(0,1,64),1.0,0.5,1.0))
 
-# %% 
+begin 
     n = 25
     T = LinRange(0, 1, n)
     x = LinRange(0,1,25)
@@ -45,21 +93,21 @@ plot(h.(LinRange(0,1,64),1.0,0.5,1.0))
         plot(x,h.(x,t), xlim=(-0.1,1.1), ylim=(-2*a0,2*a0),aspect_ratio=:equal)
     end
     gif(anim,"ang.gif", fps=12)
-# %% 
+end
 
-# %%
+begin
     plot()
     for t in LinRange(0, 1, 10)
-        plot!(x, h.(x,t), 
-            xlim=(-0.1,1.1), ylim=(-2*a0, 2*a0),
+        plot!(x,h.(x,t), 
+            xlim=(-0.1,1.1), ylim=(-2*a0,2*a0),
             aspect_ratio=:equal, label="")
     end
     plot!()
-# %% 
+end
 
 
 
-# # %% 
+# begin 
 #     n = 25
 #     T = LinRange(0, 1, n)
     
@@ -89,7 +137,6 @@ function make_naca(N;chord=1,T=0.12)
     # foil_col = (foil[:,2:end] + foil[:,1:end-1])./2
     foil.*chord
 end
-
 function make_waveform(a0 = 0.1, a = [0.367,0.323,0.310] )
     a0 = 0.1
     a = [0.367,0.323,0.310]
@@ -100,7 +147,6 @@ function make_waveform(a0 = 0.1, a = [0.367,0.323,0.310] )
     # h(x,t) = f,k -> h(x,f,k,t)
     h
 end
-
 make_waveform()
 get_collocation(foil) = (foil[:,2:end] + foil[:,1:end-1])./2
 
@@ -108,7 +154,7 @@ get_collocation(foil) = (foil[:,2:end] + foil[:,1:end-1])./2
 # plot!(foil_col[1,:],foil_col[2,:], aspect_ratio=:equal, marker=:star,color=:red)
 
 #traveling wave
-# foil[2,:] .+ h.(foil[1,:],0)
+foil[2,:] .+ h.(foil[1,:],0)
 
 abstract type Body end
     
@@ -125,58 +171,65 @@ mutable struct Foil <: Body
     k # wave number
     N # number of elements
     _foil #coordinates in the Body Frame
-    foil # Absolute fram
+    foil  # Absolute fram
     col  # collocation points
-    μs   #doublet strengths
+    μs #doublet strengths
     edge
-    edge_μs
     chord
     normals
     tangents
     panel_lengths
 end
-function norms!(foil::Foil)
-    dxdy = diff(foil.foil, dims=2)
-    lengths = sqrt.(sum(abs2,diff(foil.foil,dims=2),dims=1))
-    tx = dxdy[1,:]'./lengths
-    ty = dxdy[2,:]'./lengths
-    # tangents x,y normals x, y  lengths
-    foil.tangents = [tx; ty]
-    foil.normals  = [-ty; tx]
-    foil.panel_lengths =  lengths
-    return nothing
-end  
-
 function norms(foil)
     dxdy = diff(foil, dims=2)
     lengths = sqrt.(sum(abs2,diff(foil,dims=2),dims=1))
     tx = dxdy[1,:]'./lengths
     ty = dxdy[2,:]'./lengths
     # tangents x,y normals x, y  lengths
-    return [tx; ty],[-ty; tx], lengths
+    return [tx; ty], [-ty; tx], lengths
 end  
 
-
-source_inf(x1, x2, z) = ( x1*log(x1^2 + z^2) - x2*log(x2^2 + z^2) - 2*(x1-x2)
+source_inf(x1, x2, z) = (x1*log(x1^2 + z^2) - x2*log(x2^2 + z^2) - 2*(x1-x2)
                         + 2*z*(atan(z,x2) -atan(z,x1)))/(4π)
 doublet_inf(x1, x2, z) = -(atan(z,x2) - atan(z,x1))/(2π)
 
-function panel_frame(target,source,sourceTan)
+function panel_frame(target,source)
     _, Ns = size(source)
     _, Nt = size(target)
     Ns -= 1 #TE accomodations
     x1 = zeros(Ns, Nt)
     x2 = zeros(Ns, Nt)
     y = zeros(Ns, Nt)
-    # tx,ty,nx,ny,lens = norms(source)
-    txMat = repeat(sourceTan[1,:]', Nt, 1)
-    tyMat = repeat(sourceTan[2,:]', Nt, 1)
+    tx,ty,nx,ny,lens = norms(source)
+    txMat = repeat(tx, Nt, 1)
+    tyMat = repeat(ty, Nt, 1)
     dx = repeat(target[1,:],1,Ns) - repeat(source[1,1:end-1]',Nt,1)
     dy = repeat(target[2,:],1,Ns) - repeat(source[2,1:end-1]',Nt,1)
     x1 = dx.*txMat + dy.*tyMat
     y  = -dx.* tyMat + dy.*txMat
-    x2 = x1 - repeat(sum(diff(source,dims=2).*sourceTan,dims=1),Nt,1)
+    x2 = x1 - repeat(sum(diff(source,dims=2).*[tx;ty],dims=1),Nt,1)
     return x1, x2, y
+end
+
+function init_params()
+    N = 128
+    chord = 1.0
+    naca0012 = make_naca(N+1;chord=chord)
+    col = get_collocation(naca0012)
+    ang = make_waveform()
+    fp = FlowParams(0.01, 1, 1000., 100)
+    txty, nxny, ll = norms(naca0012)
+    edge_vec = fp.Uinf*fp.Δt*[(txty[1,end] - txty[1,1])/2.,(txty[2,end] - txty[2,1])/2.]
+    edge = [naca0012[:,end]  (naca0012[:,end] .+ edge_vec) (naca0012[:,end] .+ 2*edge_vec) ] 
+    Foil(ang,1,1,N,naca0012,naca0012,col,zeros(N-1),edge,1,txty,nxny,ll) , fp
+end
+
+foil, flow = init_params()
+
+function (foil::Foil)(fp::FlowParams) 
+    foil.foil += foil.h.(foil.foil,foil.f, foil.k, fp.n*fp.Δt)
+    fp.n += 1
+    
 end
 
 function panel_frame(target,source)
@@ -197,86 +250,7 @@ function panel_frame(target,source)
     x1, x2, y
 end
 
-
-
-function init_params()
-    N = 6
-    chord = 1.0
-    naca0012 = make_naca(N+1;chord=chord)
-    col = get_collocation(naca0012)
-    ang = make_waveform()
-    fp = FlowParams(0.01, 1, 1000., 100, 0)
-    txty, nxny, ll = norms(naca0012)
-    edge_vec = fp.Uinf.*fp.Δt*[(txty[1,end] - txty[1,1])/2.,(txty[2,end] - txty[2,1])/2.]
-    edge = [naca0012[:,end]  (naca0012[:,end] .+ edge_vec) (naca0012[:,end] .+ 2*edge_vec) ] 
-    Foil(ang,1,1,N,naca0012,naca0012,col,zeros(N-1),edge,[0,0], 1,txty,nxny,ll) , fp
-end
-
-
-
-# use a functor to do the main simulation loop
-# add in flags for plotters and other data stores -μs, pressures,
-function (foil::Foil)(fp::FlowParams) 
-    foil.foil += foil.kine.(foil.foil, foil.f, foil.k, fp.n*fp.Δt)
-    norms!(foil)
-    fp.n += 1
-    
-end
-
-function reset!(foil::Foil,fp::FlowParams)
-    foil.foil = foil._foil
-    fp.n = 0 
-end
-
-function make_infs(foil :: Foil)
-    # norms!(foil)
-    x1,x2,y    = panel_frame(foil.col, foil.foil,foil.tangents)
-    doubletMat = doublet_inf.(x1,x2,y)
-    sourceMat  = source_inf.(x1,x2,y)
-
-    x1,x2,y    = panel_frame(foil.col, foil.edge)
-    edgeInf    = doublet_inf.(x1,x2,y)
-    edgeMat    = zeros(size(doubletMat))
-    edgeMat[:,1] = -edgeInf[:,1]
-    edgeMat[:,end] = edgeInf[:,1]
-    A = doubletMat + edgeMat
-    
-    σ = sourceMat * ([-flow.Uinf,0]'*foil.normals)'
-    foil.μs = A/σ'
-    foil.edge_μs[2] = foil.edge_μs[1]
-    foil.edge_μs[1] = foil.μs[end] - foil.μs[1]
-end
-
-foil, flow = init_params()
-
-A,σ = make_infs(foil)
-μ = A/σ'
-plot(μ,marker =:circle)
-A[end]-A[1]
-""" add in data containers for μ along body and persistent storage
-    we need edge storage to 
-
-    stack velocities like this too
-"""
-old_mus = zeros((5,foil.N))
-old_mus = circshift(old_mus,(1,0))
-old_mus[1,:] = foil.μs.+1
-# %% 
-#test norms!
-norms!(foil)
-plot(foil.foil[1,:], foil.foil[2,:], aspect_ratio = :equal)
-quiver!(foil.col[1,:], foil.col[2,:], 
-        quiver = (foil.normals[1,:],foil.normals[2,:]))
- 
-# %%
-# %%
-plot(foil.foil[1,:], foil.foil[2,:], aspect_ratio = :equal)
-quiver!(foil.col[1,:], foil.col[2,:], 
-        quiver = (foil.tangents[1,:],foil.tangents[2,:]))
-#%%
-
-####____HACKING AND WHACKING AND HACKING AND WHACKING --------------------.>>>>>>,>>>>
-# %% 
+begin 
     n = 25
     T = LinRange(0, 1, n)
     
@@ -284,7 +258,7 @@ quiver!(foil.col[1,:], foil.col[2,:],
         plot(foil[1,:], foil[2,:] .+ h.(foil[1,:],t),label="",aspect_ratio=:equal)        
     end
     gif(anim,"simple.gif", fps=12)
-# %% 
+end
 
 
 
@@ -327,7 +301,7 @@ function norms(foil)
     return tx, ty, -ty, tx, lengths
 end  
 
-tx,ty, nx, ny, lengths = norms(foil.foil)
+tx,ty, nx, ny, lengths = norms(foil)
 @assert [nx,ny]⋅[tx,ty] == 0.0
 plot(foil[1,:], foil[2,:], aspect_ratio=:equal, marker=:circle)
 plot!(foil_col[1,:],foil_col[2,:], aspect_ratio=:equal, marker=:star,color=:red)
@@ -337,7 +311,7 @@ plot(foil[1,:], foil[2,:], aspect_ratio=:equal, marker=:circle)
 quiver!(foil_col[1,:], foil_col[2,:], quiver=(tx[1:end], ty[1:end]))
 
 
-# %% 
+begin 
     move = copy(foil)
     move[2,:] += h.(foil[1,:], 0.25)
     tx,ty,nx,ny,ll = norms(move)
@@ -346,7 +320,7 @@ quiver!(foil_col[1,:], foil_col[2,:], quiver=(tx[1:end], ty[1:end]))
     plot(move[1,:], move[2,:], aspect_ratio=:equal, marker=:circle)
     plot!(col[1,:], col[2,:], aspect_ratio=:equal, marker=:star,color=:red)
     quiver!(col[1,:], col[2,:], quiver=(nx[1:end],ny[1:end]),length=0.1)
-# %%   
+end  
 
 source_inf(x1, x2, z) = (x1*log(x1^2 + z^2) - x2*log(x2^2 + z^2) - 2*(x1-x2)
                         + 2*z*(atan(z,x2) -atan(z,x1)))/(4π)
@@ -389,24 +363,10 @@ pyx1 = [[ 0.12596995, -0.12568028, -0.59794013,  0.84768749,  0.6282324 ,
 pyx1 = reshape(pyx1,(6,6))
 pyx1' .-x1
 
-pyy = [[-6.93889390e-18, -8.53784634e-03, -1.87113632e-01,
--2.17472637e-01, -3.96927140e-02, -3.09641210e-02]
-[-1.69711462e-02,  1.73472348e-18, -7.15175555e-02,
--1.59674598e-01, -9.04680853e-02, -1.06885338e-01]
-[-7.88993883e-02, -3.66961963e-02,  0.00000000e+00,
--5.77980385e-02, -9.60094140e-02, -1.37849459e-01]
-[-1.37849459e-01, -9.60094140e-02, -5.77980385e-02,
- 0.00000000e+00, -3.66961963e-02, -7.88993883e-02]
-[-1.06885338e-01, -9.04680853e-02, -1.59674598e-01,
--7.15175555e-02, -3.46944695e-18, -1.69711462e-02]
-[-3.09641210e-02, -3.96927140e-02, -2.17472637e-01,
--1.87113632e-01, -8.53784634e-03,  6.93889390e-18]]
-pyy = reshape(pyy,(6,6))
-pyy'.-y
 py_z = [ 1.66533454e-17, -3.12043904e-02, -5.94075000e-02, -0.00000000e+00,
 5.94075000e-02,  3.12043904e-02, -1.66533454e-17]
 
-py_z .- foil.foil[2,:]
+py_z .- foil[2,:]
 py_foil = [1.00000000e+00  7.50000000e-01  2.50000000e-01 0.00000000e+00  2.50000000e-01   7.50000000e-01  1.00000000e+00;
            1.66533454e-17 -3.12043904e-02 -5.94075000e-02 -0.00000000e+00  5.94075000e-02  3.12043904e-02 -1.66533454e-17]
 
@@ -416,9 +376,9 @@ py_col = get_collocation(py_foil)
 
 x1,x2,y  = panel_frame(py_col, py_foil)
 
-# x1,x2,y = panel_frame(foil_col,foil)
-doubletpy= doublet_inf.(x1,x2,y)
-sourcepy = source_inf.(x1,x2,y)
+x1,x2,y = panel_frame(foil_col,foil)
+doubletMat = doublet_inf.(x1,x2,y)
+sourceMat = source_inf.(x1,x2,y)
 plot(x1, st=:contourf)
 plot(x2, st=:contourf)
 plot(y, st=:contourf)
@@ -472,3 +432,20 @@ A = doubletMat + edgeMat
 μ = A\rhs
 
 
+function make_infs(foil :: Foil)
+    x1,x2,y    = panel_frame(foil.col, foil.foil)
+    doubletMat = doublet_inf.(x1,x2,y)
+    sourceMat  = source_inf.(x1,x2,y)
+    x1,x2,y    = panel_frame(foil.col, foil.edge)
+    edgeInf    = doublet_inf.(x1,x2,y)
+    edgeMat    = zeros(size(doubletMat))
+    edgeMat[:,1] = -edgeInf[:,1]
+    edgeMat[:,end] = edgeInf[:,1]
+    A = doubletMat + edgeMat
+    σ = [flow.Uinf,0]'*foil.normals
+    A/σ
+end
+
+A = make_infs(foil)
+plot(A,marker =:circle)
+A[end]+A[1]
