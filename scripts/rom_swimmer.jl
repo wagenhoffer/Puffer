@@ -137,7 +137,7 @@ function init_params(;N=128, chord = 1.0, T=Float32 )
     naca0012 = make_naca(N+1;chord=chord).|>T
     col = get_collocation(naca0012).|>T
     ang = make_ang()
-    fp = FlowParams{T}(0.01, 1, 1000., 100, 0, 0.013)
+    fp = FlowParams{T}(1.0/150., 1, 1000., 150, 0, 0.013)
     txty, nxny, ll = norms(naca0012)
     edge_vec = fp.Uinf*fp.Δt*[(txty[1,end] - txty[1,1])/2.,(txty[2,end] - txty[2,1])/2.].|>T
     edge = [naca0012[:,end]  (naca0012[:,end] .+ edge_vec) (naca0012[:,end] .+ 2*edge_vec) ] 
@@ -235,13 +235,14 @@ velocity from motion
 """
 function setσ!(foil::Foil, wake::Wake,flow::FlowParams)
     
-    wake_ind = vortex_to_target(wake.xy,foil.col,wake.Γ)
+    # wake_ind = vortex_to_target(wake.xy,foil.col,wake.Γ)
 
     #no motion in the x-dir ...yet
+    
     vy = ForwardDiff.derivative(t->foil.kine.(foil._foil[1,:], foil.f, foil.k, t), flow.Δt*flow.n)
     vy = (vy[1:end-1]+vy[2:end])/2. #averaging, ugh...
-    foil.σs = (wake_ind[1,:].-flow.Uinf).*foil.normals[1,:] +
-              (wake_ind[2,:]+vy).*foil.normals[2,:]
+    foil.σs = (-flow.Uinf).*foil.normals[1,:] +
+              (vy).*foil.normals[2,:]
     nothing
 end
 
@@ -253,7 +254,13 @@ function move_wake!(wake::Wake,flow::FlowParams)
     nothing
 end
 
+"""
+    body_to_wake!(wake :: Wake, foil :: Foil)
+
+Influence of body onto the wake and the wake onto the wake
+"""
 function body_to_wake!(wake :: Wake, foil :: Foil)
+
     x1,x2,y = panel_frame(wake.xy, foil.foil)
     nw, nb = size(x1)
     lexp = zeros((nw,nb))
@@ -262,15 +269,12 @@ function body_to_wake!(wake :: Wake, foil :: Foil)
     xc = zeros((nw,nb)) 
     β = atan.(-foil.normals[1,:], foil.normals[2,:])
     β = repeat(β,1,nw)'
-    # rotate(α) = [cos(α) -sin(α) 
-    #             sin(α)  cos(α)]
     @. lexp = log((x1^2 + y^2)/(x2^2 + y^2)) / (4π)
     @. texp = (atan(y, x2) - atan(y, x1))/(2π)
     @. xc = lexp*cos(β) - texp*sin(β)
     @. yc = lexp*sin(β) + texp*cos(β)  
     wake.uv = [xc*foil.σs yc*foil.σs]'
-    #cirulatory effects 
-    # TODO: (double check that negative)
+    #cirulatory effects    
     Γs = -[diff(foil.μs)... diff(foil.μ_edge)...]
     ps =  hcat(foil.foil[:,2:end-1],foil.edge[:,2])
     wake.uv .+= vortex_to_target(ps, wake.xy, Γs)
@@ -322,7 +326,7 @@ function plot_current(foil::Foil, wake::Wake)
          palette=:coolwarm)
     a
 end
-""" scripting """
+# """ scripting """
 plot( wake.xy[1,:], wake.xy[2,:], markersize=wake.Γ.*10, st=:scatter,label="",palette=:coolwarm)
 # # Order of ops
 # 
@@ -340,7 +344,8 @@ movie = @animate for i = 1:flow.N
     release_vortex!(wake,foil)
     A,rhs = make_infs(foil,flow)
     setσ!(foil,wake,flow)
-    B = rhs*foil.σs
+    wake_ind = vortex_to_target(wake.xy,foil.col,wake.Γ)
+    B = -rhs*foil.σs + foil.normals[1,:].*wake_ind[1,:] - foil.normals[2,:] .* wake_ind[2,:]
     foil.μs  = A\B
     
     set_edge_strength!(foil)
