@@ -240,7 +240,8 @@ function make_infs(foil::Foil, flow::FlowParams; ϵ=1e-10)
     # A, sourceMat
     doubletMat + edgeMat, sourceMat
 end
-"""
+
+""" 
     setσ!(foil::Foil, wake::Wake,flow::FlowParams)
 
 induced velocity from vortex wake
@@ -257,7 +258,7 @@ function setσ!(foil::Foil, wake::Wake, flow::FlowParams)
     vy = (vy[1:end-1] + vy[2:end]) / 2.0 #averaging, ugh...
     foil.σs = (-flow.Uinf .+ wake_ind[1,:]) .* foil.normals[1, :] +
               (vy + wake_ind[1,:])  .* foil.normals[2, :]
-    nothing
+    vx,vy
 end
 
 
@@ -338,6 +339,7 @@ function cancel_buffer_Γ!(wake::Wake, foil::Foil)
     wake.Γ[1] = -foil.μ_edge[end]
     nothing
 end
+
 function plot_current(foil::Foil, wake::Wake; window = nothing)
     if !isnothing(window)
         xs = (window[1],window[2])        
@@ -411,7 +413,7 @@ function run_sim()
     foil, flow = init_params(; N=6, T=Float64, motion=:no_motion)
     foil.foil = (foil._foil'*rotate(-10*pi/180)')'
     wake = Wake(foil)
-    for i = 1:flow.N*11
+    for i = 1:flow.N*3
         # begin
         release_vortex!(wake, foil)
         (foil)(flow) #kinematics
@@ -437,35 +439,61 @@ if !isnothing(win)
 end
 foil
 
-mu = [-0.3344830029220367, 0.046887097189540206, 0.05401179810143492, -0.14739265025965131, -0.13302270146791537, 0.07736889373177576, -0.07859142159849758, 0.05871436687553942, 0.049945213244593105, 0.05204406198739323, 0.06214626991860662, -0.07552164319589232, 0.07960546913156434, 0.07788769104130211]
-
 ##BSPLINES FOR determining the dmu along the body
 using BSplineKit
 acc_lens = cumsum(foil.panel_lengths[:])
 # B = BSplineBasis(BSplineOrder(4), acc_lens[:])
-S = interpolate(acc_lens, mu, BSplineOrder(4))
+S = interpolate(acc_lens, foil.μs, BSplineOrder(4))
 # R_n = RecombinedBSplineBasis(Derivative(1), S)
 dmu = Derivative(1) * S
-# dmu.(acc_lens)
+dmudl =  dmu.(acc_lens)
 plot(acc_lens, S.(acc_lens))
-plot!(acc_lens, dmu.(acc_lens))
+plot!(acc_lens, dmu.(acc_lens),st=:scatter)
+#TODO: SPLIT σ into local and inducec? it is lumped into one now
+qp = repeat(dmudl',2,1).*foil.tangents + repeat(foil.σs',2,1).*foil.normals
+
+function get_qp(foil::Foil)
+    acc_lens = cumsum(foil.panel_lengths[:])
+    # B = BSplineBasis(BSplineOrder(4), acc_lens[:])
+    S = interpolate(acc_lens, foil.μs, BSplineOrder(4))
+
+    dmu = Derivative(1) * S
+    dmudl =  dmu.(acc_lens)
+    plot(acc_lens, S.(acc_lens))
+    plot!(acc_lens, dmu.(acc_lens),st=:scatter)
+    #TODO: SPLIT σ into local and inducec? it is lumped into one now
+    qp = repeat(dmudl',2,1).*foil.tangents + repeat(foil.σs',2,1).*foil.normals
+    qp
+end
 
 
+function get_dmudt!(old_mus,foil::Foil, flow::FlowParams)
+    dmudt = (3 * foil.μs - 4 * old_mus[1, :] + old_mus[2, :]) / (2 *flow.Δt)
+    old_mus = circshift(old_mus, (1, 0))
+    old_mus[1,:] = foil.μs
+    dmudt, old_mus
+end
 
 
-
-
-
+dmudt, old_mus = get_dmudt!(old_mus, foil, flow)
+qp = get_qp(foil)
+p_s  = -flow.ρ*sum(qp.^2,dims=1)/2.
+p_us = flow.ρ*dmudt + flow.ρ*(qp[1,:]*(flow.Uinf + vx) + qp[2,:]*vy)
+p    = p_s + self.p_us
+cp   = p / (0.5*flow.ρ*V**2)
 
 ### SCRATHCERS
-# rotating old datums
-old_cols = zeros(5, size(foil.col)...)
-for i = 1:5
-    old_cols[i, :, :] .= i
+# rotating old datums - mu, phi, induced velocity
+old_mus = zeros(3, foil.N)
+for i = 1:2
+    old_mus[i, :] .= i
 end
-old_cols = circshift(old_cols, (1, 0, 0))
-old_cols[2, :, :]
+old_mus
 
+old_mus[2, :]
+dmudt = (3 * foil.μs - 4 * old_mus[1, :] + old_mus[2, :]) / (2 *flow.Δt)
+old_mus = circshift(old_mus, (1, 0))
+old_mus[1,:] = foil.μs
 # %% 
 sten = (old_cols[2, :, :] - old_cols[1, :, :]) / (flow.Δt) #.-[flow.Uinf,0]
 kine(t) = foil.kine.(foil._foil[1, :], foil.f, foil.k, t)
