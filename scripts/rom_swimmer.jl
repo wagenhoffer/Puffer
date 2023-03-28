@@ -52,6 +52,7 @@ mutable struct Foil{T} <: Body
     normals::Matrix{T}
     tangents::Matrix{T}
     panel_lengths::Vector{T}
+    panel_vel::Matrix{T}
 end
 
 mutable struct Wake{T}
@@ -96,7 +97,8 @@ end
 function make_ang(a0=0.1, a=[0.367, 0.323, 0.310])
     a0 = a0
     a = a
-    f = k = 1
+    f = π
+    k = 0.5
 
     amp(x, a) = a[1] + a[2] * x + a[3] * x^2
     h(x, f, k, t) = a0 * amp(x, a) * sin(2π * (k * x - f * t))
@@ -106,6 +108,10 @@ end
 function no_motion(;T=Float64)
     sig(x,f,k,t) = 0.0
 end
+function angle_of_attack(;aoa = 5, T=Float64)
+    sig(x,f,k,t) = rotate(-aoa*pi/180)'
+end
+
 function norms(foil)
     dxdy = diff(foil, dims=2)
     lengths = sqrt.(sum(abs2, diff(foil, dims=2), dims=1))
@@ -136,7 +142,7 @@ doublet_inf(x1, x2, z) = -(atan(z, x2) - atan(z, x1)) / (2π)
 
 TODO Add wake stuff
 """
-function init_params(; N=128, chord=1.0, T=Float32, motion=:make_ang)
+function init_params(; N=128, chord=1.0, T=Float32, motion=:make_ang, f =1 , k = 1)
     N = N
     chord = T(chord)
     naca0012 = make_naca(N + 1; chord=chord) .|> T
@@ -149,8 +155,8 @@ function init_params(; N=128, chord=1.0, T=Float32, motion=:make_ang)
     
     edge_vec = fp.Uinf * fp.Δt * [(txty[1, end] - txty[1, 1]) / 2.0, (txty[2, end] - txty[2, 1]) / 2.0] .|> T
     edge = [naca0012[:, end] (naca0012[:, end] .+ edge_vec) (naca0012[:, end] .+ 2 * edge_vec)]
-    #   kine, f, k, N, _foil,    foil ,    col,             σs, μs,         edge, chord, normals, tangents, panel_lengths
-    Foil{T}(ang, T(1), T(1), N, naca0012, copy(naca0012), col, zeros(T, N), zeros(T, N), edge, zeros(T, 2), 1, nxny, txty, ll[:]), fp
+    #   kine, f, k, N, _foil,    foil ,    col,             σs, μs,         edge, chord, normals, tangents, panel_lengths,panbel_vel
+    Foil{T}(ang, T(f), T(k), N, naca0012, copy(naca0012), col, zeros(T, N), zeros(T, N), edge, zeros(T, 2), 1, nxny, txty, ll[:], zeros(size(nxny))), fp
 end
 
 get_mdpts(foil) = (foil[:, 2:end] + foil[:, 1:end-1]) ./ 2
@@ -171,15 +177,14 @@ Use a functor to advance the time-step
 """
 function (foil::Foil)(flow::FlowParams)
     #perform kinematics
+    #TODO: only modifies the y-coordinates
     foil.foil[2, :] = foil._foil[2, :] .+ foil.kine.(foil._foil[1, :], foil.f, foil.k, flow.n * flow.Δt)
     #Advance the foil in flow
-    foil.foil .+= [-flow.Uinf, 0] .* flow.Δt
-    # foil.col = get_mdpts(foil.foil)
+    foil.foil .+= [-flow.Uinf, 0] .* flow.Δt    
     norms!(foil)
     set_collocation!(foil)    
     move_edge!(foil, flow)
     flow.n += 1
-    # print(foil.foil[2,:] == foil._foil[2,:])
 end
 
 
@@ -197,7 +202,15 @@ function get_panel_vels(foil::Foil, fp::FlowParams)
     [zeros(size(vy)) vy]
 end
 
-
+function get_panel_vels!(foil::Foil, fp::FlowParams)
+    _t = fp.n * fp.Δt
+    col = get_mdpts(foil._foil)
+    vy = ForwardDiff.derivative(t -> 
+        foil.kine.(col[1, :], foil.f, foil.k, t), _t)
+    # vy = (vy[1:end-1]+vy[2:end])/2.            
+    foil.panel_vel = [zeros(size(vy))'; vy']
+    nothing
+end
 """
     panel_frame(target,source)
 
@@ -225,9 +238,9 @@ function edge_circulation(foil::Foil)
     -foil.μ_edge[1], foil.μ_edge[1] - foil.μ_edge[2], foil.μ_edge[2]
 end
 
-function make_infs(foil::Foil, flow::FlowParams; ϵ=1e-10)
+function make_infs(foil::Foil; ϵ=1e-10)
     x1, x2, y = panel_frame(foil.col, foil.foil)
-    ymask = abs.(y) .> ϵ
+    # ymask = abs.(y) .> ϵ
     # y = y .* ymask
     doubletMat = doublet_inf.(x1, x2, y)
     sourceMat = source_inf.(x1, x2, y)
@@ -237,8 +250,8 @@ function make_infs(foil::Foil, flow::FlowParams; ϵ=1e-10)
     edgeMat[:, 1] = -edgeInf[:, 1]
     edgeMat[:, end] = edgeInf[:, 1]
     A = doubletMat + edgeMat
-    # A, sourceMat
-    doubletMat + edgeMat, sourceMat
+    # A, sourceMat, edge panel mu
+    doubletMat + edgeMat, sourceMat, edgeInf[:,2]
 end
 
 """ 
@@ -248,17 +261,17 @@ induced velocity from vortex wake
 velocity from free stream
 velocity from motion 
 """
-function setσ!(foil::Foil, wake::Wake, flow::FlowParams)
+function setσ!(foil::Foil, wake::Wake, flow::FlowParams;)
 
-    wake_ind = vortex_to_target(wake.xy,foil.col,wake.Γ)
+    wake_ind = vortex_to_target(wake.xy,foil.col,wake.Γ;δ=0.13) #;δ=flow.δ)
 
-    #no body motion in the x-dir ...yet
-
-    vy = ForwardDiff.derivative(t -> foil.kine.(foil._foil[1, :], foil.f, foil.k, t), flow.Δt * flow.n)
-    vy = (vy[1:end-1] + vy[2:end]) / 2.0 #averaging, ugh...
-    foil.σs = (-flow.Uinf .+ wake_ind[1,:]) .* foil.normals[1, :] +
-              (vy + wake_ind[1,:])  .* foil.normals[2, :]
-    vx,vy
+    #no body motion in the x-dir ...yet #TODO
+    get_panel_vels!(foil,flow)
+    # vy = ForwardDiff.derivative(t -> foil.kine.(foil._foil[1, :], foil.f, foil.k, t), flow.Δt * flow.n)
+    # vy = (vy[1:end-1] + vy[2:end]) / 2.0 #averaging, ugh...
+    foil.σs = (-flow.Uinf .+ wake_ind[1,:] + foil.panel_vel[1,:]) .* foil.normals[1, :] +
+                            (wake_ind[2,:] + foil.panel_vel[2,:]) .* foil.normals[2, :]
+    nothing
 end
 
 
@@ -296,8 +309,10 @@ function body_to_wake!(wake::Wake, foil::Foil)
     wake.uv = [xc * foil.σs yc * foil.σs]'
     #cirulatory effects    
     #TODO: cancellation of the buffer issues
-    Γs = -[diff(foil.μs)... diff(foil.μ_edge)... -foil.μ_edge[end]]
-    ps = hcat(foil.foil[:, 2:end-1], foil.edge[:, 2:end])
+    # Γs = -[diff(foil.μs)... diff(foil.μ_edge)... -foil.μ_edge[end]]
+    # ps = hcat(foil.foil[:, 2:end-1], foil.edge[:, 2:end])
+    Γs = -[diff(foil.μs)... diff(foil.μ_edge)... ]
+    ps = hcat(foil.foil[:, 2:end-1], foil.edge[:, 2])
     wake.uv .+= vortex_to_target(ps, wake.xy, Γs)
     nothing
 end
@@ -319,7 +334,7 @@ end
 
 function release_vortex!(wake::Wake, foil::Foil)
     wake.xy = [wake.xy foil.edge[:, end]]
-    wake.Γ = [wake.Γ..., foil.μ_edge[1] - foil.μ_edge[2]]
+    wake.Γ =  [wake.Γ..., foil.μ_edge[1] - foil.μ_edge[2]]
     wake.uv = [wake.uv [0.0, 0.0]]
     nothing
 end
@@ -336,7 +351,7 @@ end
 function cancel_buffer_Γ!(wake::Wake, foil::Foil)
     #TODO : Add iterator for matching 1->i for nth foil
     wake.xy[:, 1] = foil.edge[:, end]
-    wake.Γ[1] = -foil.μ_edge[end]
+    wake.Γ[1]     = -foil.μ_edge[end]
     nothing
 end
 
@@ -355,8 +370,9 @@ function plot_current(foil::Foil, wake::Wake; window = nothing)
         color=:redsblues)
     a
 end
-plot_current(foil,wake;window= (minimum(foil.foil[1,:]')-foil.chord/2.0, maximum(foil.foil[1,:])+foil.chord*5))
-plot_current(foil,wake;window=(-2.2,-1.8))
+
+plot_current(foil,wake; window= (minimum(foil.foil[1,:]')-foil.chord/2.0, maximum(foil.foil[1,:])+foil.chord*5))
+plot_current(foil,wake; window=(-2.2,-1.8))
                                 
 
 function plot_with_normals(foil::Foil)
@@ -374,21 +390,46 @@ end
 #
 # Mixins needed - body velocity
 # finite diffs for pressures
+function get_qp(foil::Foil)
+    acc_lens = cumsum(foil.panel_lengths[:])
+    # B = BSplineBasis(BSplineOrder(4), acc_lens[:])
+    S = interpolate(acc_lens, foil.μs, BSplineOrder(4))
+    dmu = Derivative(1) * S
+    dmudl =  -dmu.(acc_lens)
+
+    #TODO: SPLIT σ into local and inducec? it is lumped into one now
+    qp = repeat(dmudl',2,1).*foil.tangents + repeat(foil.σs',2,1).*foil.normals
+    qp
+end
+
+#initial allocation
+function get_dmudt!(foil::Foil, flow::FlowParams)
+    old_mus = zeros(3,foil.N)
+    old_mus[1,:] = foil.μs
+    foil.μs/flow.Δt, old_mus
+end
+
+function get_dmudt!(old_mus,foil::Foil, flow::FlowParams)
+    dmudt = (3 * foil.μs - 4 * old_mus[1, :] + old_mus[2, :]) / (2 *flow.Δt)
+    old_mus = circshift(old_mus, (1, 0))
+    old_mus[1,:] = foil.μs
+    dmudt, old_mus
+end
 
 rotate(α) = [cos(α) -sin(α)
              sin(α)  cos(α)]
 begin
-    foil, flow = init_params(; N=6, T=Float64, motion=:no_motion)
-    foil.foil = (foil._foil'*rotate(-10*pi/180)')'
+    foil, flow = init_params(; N=128, T=Float64, motion=:no_motion,f=1.1, k=0.55)
+    foil._foil = (foil._foil'*rotate(-5*pi/180)')'
     wake = Wake(foil)
-    movie = @animate for i = 1:flow.N
-    # begin
-    release_vortex!(wake, foil)
+    movie = @animate for i = 1:flow.N    *3
+        release_vortex!(wake, foil)
         (foil)(flow) #kinematics
-        A, rhs = make_infs(foil, flow)
+        A, rhs, edge_body = make_infs(foil)
         setσ!(foil, wake, flow)
         # wake_ind = vortex_to_target(wake.xy, foil.col, wake.Γ)
-        B = -rhs * foil.σs  
+        buff = edge_body * foil.μ_edge[1]
+        B = - rhs * foil.σs  - buff
         foil.μs = A \ B
 
         set_edge_strength!(foil)
@@ -401,49 +442,64 @@ begin
         @assert -foil.μs[1] + foil.μs[end] - foil.μ_edge[1] == 0.0
         win= (minimum(foil.foil[1,:]')-foil.chord/2.0, maximum(foil.foil[1,:])+foil.chord*5)
         wm = maximum(foil.foil[1,:]')
-        win= (wm-0.2, wm+0.2)
-        a = plot_current(foil, wake;window=win)
+        win= (wm-1.2, wm+3.1)
+        a = plot_current(foil, wake; window=win)
         a
     end
     gif(movie, "wake.gif", fps=60)
 end
 
 
-function run_sim()
-    foil, flow = init_params(; N=6, T=Float64, motion=:no_motion)
-    foil.foil = (foil._foil'*rotate(-10*pi/180)')'
+function run_sim(;steps = flow.N*3)
+    foil, flow = init_params(; N=128, T=Float64, motion=:no_motion)
+    foil._foil = (foil._foil'*rotate(-5*pi/180)')'
     wake = Wake(foil)
-    for i = 1:flow.N*3
+    old_mus = zeros(3, foil.N)
+    for i = 1:steps
         # begin
         release_vortex!(wake, foil)
         (foil)(flow) #kinematics
-        A, rhs = make_infs(foil, flow)
+        A, rhs, edge_body = make_infs(foil)
         setσ!(foil, wake, flow)
         # wake_ind = vortex_to_target(wake.xy, foil.col, wake.Γ)
-        B = -rhs * foil.σs  
+        buff = edge_body * foil.μ_edge[1]
+        B = - rhs * foil.σs  - buff
         foil.μs = A \ B
+
+        dmudt, old_mus = get_dmudt!(old_mus, foil, flow)        
+        qp = get_qp(foil)
+        p_s  = -flow.ρ*sum(qp.^2,dims=1)/2.    
+        p_us = flow.ρ.*dmudt' + flow.ρ.*(qp[1,:]'.*(-flow.Uinf .+ foil.panel_vel[1,:]') 
+                                     .+ qp[2,:]'.*(foil.panel_vel[2,:]'))
+        p    = p_s .+ p_us
+        cp   = p ./ (0.5*flow.ρ*flow.Uinf^2)
+        push!(cps,cp)
 
         set_edge_strength!(foil)
         cancel_buffer_Γ!(wake, foil)
         body_to_wake!(wake, foil)
         wake_self_vel!(wake, flow)
         move_wake!(wake, flow)
+
+        #### PRESSURE PUT INTO A LOOP
+       
+
     end
     foil, wake
 end
 
-@btime run_sim();
-win = (1,1)
-if !isnothing(win)
-    print("1")
+begin   
+    foil,wake = run_sim(;steps=flow.N);
+    plot(foil.col[1,:], cps[end][:], yflip=true, label="")
+    plot!(foil.col[1,:], -foil.col[2,:], label="")
 end
-foil
-
 ##BSPLINES FOR determining the dmu along the body
+
 using BSplineKit
 acc_lens = cumsum(foil.panel_lengths[:])
 # B = BSplineBasis(BSplineOrder(4), acc_lens[:])
 S = interpolate(acc_lens, foil.μs, BSplineOrder(4))
+S = interpolate(acc_lens, mu, BSplineOrder(4))
 # R_n = RecombinedBSplineBasis(Derivative(1), S)
 dmu = Derivative(1) * S
 dmudl =  dmu.(acc_lens)
@@ -451,37 +507,28 @@ plot(acc_lens, S.(acc_lens))
 plot!(acc_lens, dmu.(acc_lens),st=:scatter)
 #TODO: SPLIT σ into local and inducec? it is lumped into one now
 qp = repeat(dmudl',2,1).*foil.tangents + repeat(foil.σs',2,1).*foil.normals
+fdmu = diff(foil.μs)'./diff(acc_lens)'
 
-function get_qp(foil::Foil)
-    acc_lens = cumsum(foil.panel_lengths[:])
-    # B = BSplineBasis(BSplineOrder(4), acc_lens[:])
-    S = interpolate(acc_lens, foil.μs, BSplineOrder(4))
-
-    dmu = Derivative(1) * S
-    dmudl =  dmu.(acc_lens)
-    plot(acc_lens, S.(acc_lens))
-    plot!(acc_lens, dmu.(acc_lens),st=:scatter)
-    #TODO: SPLIT σ into local and inducec? it is lumped into one now
-    qp = repeat(dmudl',2,1).*foil.tangents + repeat(foil.σs',2,1).*foil.normals
-    qp
-end
-
-
-function get_dmudt!(old_mus,foil::Foil, flow::FlowParams)
-    dmudt = (3 * foil.μs - 4 * old_mus[1, :] + old_mus[2, :]) / (2 *flow.Δt)
-    old_mus = circshift(old_mus, (1, 0))
-    old_mus[1,:] = foil.μs
-    dmudt, old_mus
-end
-
-
+dmudt, old_mus = get_dmudt!(foil, flow)
 dmudt, old_mus = get_dmudt!(old_mus, foil, flow)
 qp = get_qp(foil)
 p_s  = -flow.ρ*sum(qp.^2,dims=1)/2.
-p_us = flow.ρ*dmudt + flow.ρ*(qp[1,:]*(flow.Uinf + vx) + qp[2,:]*vy)
-p    = p_s + self.p_us
-cp   = p / (0.5*flow.ρ*V**2)
+p_us = flow.ρ.*dmudt + flow.ρ.*(qp[1,:].*(flow.Uinf ) .+ qp[2,:].*foil.panel_vel[2,:])
+p    = p_s .+ p_us'
+cp   = p ./ (0.5*flow.ρ*flow.Uinf^2)
 
+dforce = repeat(-p.*foil.panel_lengths',2,1).*foil.normals
+dpress = sum(dforce.*foil.panel_vel,dims=2)
+force = sum(dforce,dims=2)
+lift = force[1]
+thrust = force[2]
+power = sum(dpress, dims=1)[1]
+den = 1/2 *(flow.ρ*flow.Uinf^2*foil.chord)
+cforce = sum(sqrt.(force.^2))/den
+clift = lift/den
+cthrust = thrust/den
+cpower = power/den/flow.Uinf
+plot(foil.col[1,:],cp')
 ### SCRATHCERS
 # rotating old datums - mu, phi, induced velocity
 old_mus = zeros(3, foil.N)
