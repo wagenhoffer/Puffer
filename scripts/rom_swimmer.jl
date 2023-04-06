@@ -306,9 +306,11 @@ function body_to_wake!(wake::Wake, foil::Foil)
     @. yc = lexp * sin(β) + texp * cos(β)
     wake.uv = [xc * foil.σs yc * foil.σs]'
     #cirulatory effects    
-    #TODO: cancellation of the buffer issues
-    Γs = -[diff(foil.μs)... diff(foil.μ_edge)... -foil.μ_edge[end]]
-    ps = hcat(foil.foil[:, 2:end-1], foil.edge[:, 2:end])
+    #bOUND CIRCULATION (skip kutta for now) Γe2 Γe3(buffer) = μe2
+    # Γs = -[diff(foil.μs)... diff(foil.μ_edge)... -foil.μ_edge[end]]
+    # ps = hcat(foil.foil[:, 2:end-1], foil.edge[:, 2:end])
+    Γs = -[diff(foil.μs)... -foil.μ_edge[end]]
+    ps = hcat(foil.foil[:, 2:end-1], foil.edge[:, end])
     # Γs = -[diff(foil.μs)... diff(foil.μ_edge)... ]
     # ps = hcat(foil.foil[:, 2:end-1], foil.edge[:, 2])
     wake.uv .+= vortex_to_target(ps, wake.xy, Γs)
@@ -333,7 +335,7 @@ end
 function release_vortex!(wake::Wake, foil::Foil)
     # wake.xy = [wake.xy foil.edge[:, end]]
     wake.xy = [wake.xy foil.edge[:, 2]]
-    wake.Γ =  [wake.Γ..., foil.μ_edge[1] - foil.μ_edge[2]]
+    wake.Γ =  [wake.Γ..., (foil.μ_edge[1] - foil.μ_edge[2])]
     wake.uv = [wake.uv [0.0, 0.0]]
     nothing
 end
@@ -418,12 +420,9 @@ begin
     foil, flow = init_params(; N=50, T=Float64, motion=:no_motion,f=1.1, k=0.55)
     foil._foil = (foil._foil'*aoa')'
     wake = Wake(foil)
+    (foil)(flow)
     movie = @animate for i = 1:flow.N
         # begin
-        if i!=1 
-            release_vortex!(wake, foil)
-        end
-        (foil)(flow) #kinematics
         A, rhs, edge_body = make_infs(foil)
         setσ!(foil,  flow)
         wake_ind = vortex_to_target(wake.xy, foil.col, wake.Γ)
@@ -446,6 +445,11 @@ begin
         win= (wm- .2, wm+.1)
         a = plot_current(foil, wake; window=win)
         a
+        if i!=1 
+            release_vortex!(wake, foil)
+        end
+         #kinematics
+        (foil)(flow)
     end
     gif(movie, "wake.gif", fps=60)
 end
@@ -468,13 +472,14 @@ function run_sim(; steps = flow.N*10, aoa = rotate(-0*pi/180)')
     # Initialize arrays to store the pressure coefficients over time
     # cpus = []
     # cps = []
+    (foil)(flow)
     for i = 1:steps        
-        # Release vortex from the wake
-        if i != 1
-            release_vortex!(wake, foil)        
-        end
-        # Update the kinematics of the foil
-        (foil)(flow)
+        # # Release vortex from the wake
+        # if i != 1
+        #     release_vortex!(wake, foil)        
+        # end
+        # # Update the kinematics of the foil
+        
         # Create the influence matrix and right-hand side vector for the foil
         A, rhs, edge_body = make_infs(foil)        
         # Set the surface vorticity of the foil
@@ -516,6 +521,11 @@ function run_sim(; steps = flow.N*10, aoa = rotate(-0*pi/180)')
         wake_self_vel!(wake, flow)        
         # Move the wake
         move_wake!(wake, flow)
+        if i!=1 
+            release_vortex!(wake, foil)
+        end
+         #kinematics
+        (foil)(flow)
         win= (wm- .2, wm+.1)
         a = plot_current(foil, wake; window=win)
     end
@@ -527,7 +537,7 @@ end
 begin   
     cps = []
     cpus = []
-    foil,wake = run_sim(;steps=flow.N,  aoa = rotate(4*pi/180)');
+    foil,wake = run_sim(;steps=flow.N,  aoa = rotate(-4*pi/180)');
     # plot(foil.col[1,:], cps[end][:], yflip=true, label="steady")
     # plot!(foil.col[1,:], cpus[end][:], yflip=true, label="unsteady")
     plot(foil.col[1,:], cps[end][:], yflip=true, label="total",ls=:dash)
