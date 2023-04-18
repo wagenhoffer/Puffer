@@ -17,6 +17,12 @@ requirements:
 
 P(Γ((x,y)(t))) we want to reduce Γ while still getting pressure along the body
 
+
+TODOS: 
+adding heaving pitching
+multiple foils
+nail down steady flow at TE
+Theodorsen comparisons
 """
 
 using LinearAlgebra
@@ -110,6 +116,12 @@ function make_ang(a0=0.1, a=[0.367, 0.323, 0.310])
     h
 end
 
+function make_heave_pitch(h0, θ0; T= Float64)
+    θ(f,ψ,t) = θ0*sin(2π*f*t + ψ)
+    h(f,t) = h0*sin(2π*f*t)
+    [θ,h]
+end
+
 function no_motion(;T=Float64)
     sig(x,f,k,t) = 0.0
 end
@@ -149,16 +161,19 @@ doublet_inf(x1, x2, z) = -(atan(z, x2) - atan(z, x1)) / (2π)
 
 TODO Add wake stuff
 """
-function init_params(; N=128, chord=1.0, T=Float32, motion=:make_ang, f =1 , k = 1)
+function init_params(; N=128, chord=1.0, T=Float32, motion=:make_ang, f =1 , k = 1, motion_parameters=nothing)
     N = N
     chord = T(chord)
     naca0012 = make_naca(N + 1; chord=chord) .|> T
-
-    ang = eval(motion)()
+    if isnothing(motion_parameters)
+        kine = eval(motion)()
+    else
+        kine = eval(motion)(motion_parameters...)
+    end
     Uinf = 1
     ρ= 1000. 
     Nt = 150
-    Δt = 1 /Nt
+    Δt = 1 /Nt/f
     nt = 0
     δ = Uinf*Δt*1.3
     fp = FlowParams{T}(Δt, Uinf, ρ, Nt, nt,δ)
@@ -166,21 +181,23 @@ function init_params(; N=128, chord=1.0, T=Float32, motion=:make_ang, f =1 , k =
     #TODO: 0.001 is a magic number for now
     col = (get_mdpts(naca0012) .+  repeat(0.001 .*ll,2,1).*-nxny).|> T
     
-    edge_vec = fp.Uinf * fp.Δt * [(txty[1, end] - txty[1, 1]) / 2.0, (txty[2, end] - txty[2, 1]) / 2.0] .|> T
+    edge_vec = fp.Uinf * fp.Δt * [(txty[1, end] - txty[1, 1]) , (txty[2, end] - txty[2, 1]) ] .|> T
     edge = [naca0012[:, end] (naca0012[:, end] .+0.5*edge_vec) (naca0012[:, end] .+ 1.5 * edge_vec)]
     #   kine, f, k, N, _foil,    foil ,    col,             σs, μs,         edge, chord, normals, tangents, panel_lengths,panbel_vel
-    Foil{T}(ang, T(f), T(k), N, naca0012, copy(naca0012), col, zeros(T, N), zeros(T, N), edge, zeros(T, 2), 1, nxny, txty, ll[:], zeros(size(nxny))), fp
+    Foil{T}(kine, T(f), T(k), N, naca0012, copy(naca0012), col, zeros(T, N), zeros(T, N), edge, zeros(T, 2), 1, nxny, txty, ll[:], zeros(size(nxny))), fp
 end
 
 get_mdpts(foil) = (foil[:, 2:end] + foil[:, 1:end-1]) ./ 2
 
 function move_edge!(foil::Foil, flow::FlowParams)
-    edge_vec = flow.Uinf * flow.Δt * [(foil.tangents[1, end] - foil.tangents[1, 1]), (foil.tangents[2, end] - foil.tangents[2, 1]) ]
-    foil.edge = [foil.foil[:, end] (foil.foil[:, end] .+ 0.5*edge_vec) (foil.foil[:, end] .+ 1.5 * edge_vec)]
+    edge_vec  = [(foil.tangents[1, end] - foil.tangents[1, 1]), (foil.tangents[2, end] - foil.tangents[2, 1]) ]
+    edge_vec  ./= norm(edge_vec) 
+    edge_vec = flow.Uinf * flow.Δt * edge_vec 
+    foil.edge = [foil.foil[:, end] (foil.foil[:, end] .+ 0.25*edge_vec) (foil.foil[:, end] .+ 1.25 * edge_vec)]
     nothing
 end
 
-function set_collocation!(foil::Foil, S = 0.01)
+function set_collocation!(foil::Foil, S = 0.009)
     foil.col = (get_mdpts(foil.foil) .+  repeat(S .*foil.panel_lengths',2,1).*-foil.normals)
 end
 """
@@ -191,37 +208,79 @@ Use a functor to advance the time-step
 function (foil::Foil)(flow::FlowParams)
     #perform kinematics
     #TODO: only modifies the y-coordinates
-    foil.foil[2, :] = foil._foil[2, :] .+ foil.kine.(foil._foil[1, :], foil.f, foil.k, flow.n * flow.Δt)
-    #Advance the foil in flow
-    foil.foil .+= [-flow.Uinf, 0] .* flow.Δt    
+    
+    if typeof(foil.kine) == Vector{Function}
+        θ = foil.kine[1](foil.f,flow.n*flow.Δt, -π/2)
+        h = foil.kine[2](foil.f,flow.n*flow.Δt)
+        foil.foil[1,:] = foil._foil[1,:] *cos(θ) -  foil._foil[2,:] *sin(θ) #.+ foil.foil[1,foil.N÷2]
+        foil.foil[2,:] = foil._foil[1,:] *sin(θ) +  foil._foil[2,:] *cos(θ) .+ h 
+        #Advance the foil in flow
+        foil.foil .+= [-flow.Uinf, 0] .* flow.Δt .*flow.n  
+    else
+        foil.foil[2, :] = foil._foil[2, :] .+ foil.kine.(foil._foil[1, :], foil.f, foil.k, flow.n * flow.Δt)
+        #Advance the foil in flow
+        foil.foil .+= [-flow.Uinf, 0] .* flow.Δt 
+    end
     norms!(foil)
     set_collocation!(foil)    
     move_edge!(foil, flow)
     flow.n += 1
 end
 
+begin
+    # Visualizations for heaving and pitching motions
+    foil, flow = init_params(; N=50, T=Float64, motion=:make_heave_pitch,
+                               f=1/(2π),  motion_parameters=[-2, π/20])
+    a = plot()
+    for i=1:flow.N*1
+        (foil)(flow)
+        plot!(a, foil.foil[1,:],foil.foil[2,:],aspect_ratio=:equal, label="",color=:red)
+    end
+    a
+end
 
 """
     get_panel_vels(foil::Foil,fp::FlowParams)
 
-Autodiff the panel velocities, right now it is only moving in the y-dir and x-dir is free-stream
+Autodiff the panel Velocities
+accepts 1d waveforms and 2D prescribed kinematics
 """
 function get_panel_vels(foil::Foil, fp::FlowParams)
     _t = fp.n * fp.Δt
     col = get_mdpts(foil._foil)
-    vy = ForwardDiff.derivative(t -> foil.
-        kine.(col[1, :], foil.f, foil.k, t), _t)
-    # vy = (vy[1:end-1]+vy[2:end])/2.        
-    [zeros(size(vy)) vy]
+    
+    if typeof(foil.kine) == Vector{Function}
+        theta(t) = foil.kine[1](foil.f, t, -π/2)
+        heave(t) = foil.kine[2](foil.f, t)
+        dx(t) = foil._foil[1,:] *cos(theta(t)) -  foil._foil[2,:] *sin(theta(t))
+        dy(t) =foil._foil[1,:] *sin(theta(t)) +  foil._foil[2,:] *cos(theta(t)) .+ heave(t)
+        # [ForwardDiff.derivative(t->dx(t), _t),ForwardDiff.derivative(t->dy(t), _t)]
+        vels = [ForwardDiff.derivative(t->dx(t), _t),ForwardDiff.derivative(t->dy(t), _t)]
+    else 
+        vy = ForwardDiff.derivative(t -> foil.
+                kine.(col[1, :], foil.f, foil.k, t), _t)
+        vels = [zeros(size(vy)) vy]
+    end
+    vels 
 end
 
 function get_panel_vels!(foil::Foil, fp::FlowParams)
     _t = fp.n * fp.Δt
     col = get_mdpts(foil._foil)
-    vy = ForwardDiff.derivative(t -> 
-        foil.kine.(col[1, :], foil.f, foil.k, t), _t)
-    # vy = (vy[1:end-1]+vy[2:end])/2.            
-    foil.panel_vel = [zeros(size(vy))'; vy']
+    #TODO switch to a s-exp label dispatch
+    if typeof(foil.kine) == Vector{Function}
+        theta(t) = foil.kine[1](foil.f, t, -π/2 )
+        heave(t) = foil.kine[2](foil.f, t)
+        dx(t) = col[1,:] *cos(theta(t)) -  col[2,:] *sin(theta(t))
+        dy(t) = col[1,:] *sin(theta(t)) +  col[2,:] *cos(theta(t)) .+ heave(t)
+        
+        foil.panel_vel[1,:] = ForwardDiff.derivative(t->dx(t), _t)
+        foil.panel_vel[2,:] = ForwardDiff.derivative(t->dy(t), _t)
+    else
+        vy = ForwardDiff.derivative(t -> foil.
+                kine.(col[1, :], foil.f, foil.k, t), _t)
+                foil.panel_vel = [zeros(size(vy)) vy]'
+    end
     nothing
 end
 """
@@ -258,7 +317,7 @@ return the circulation bound to the foil and the edge panels
 function get_circulations(foil::Foil)
     egamma = edge_circulation(foil)
     fgamma = [-foil.μs[1], -diff(foil.μs)..., foil.μs[end]]
-    fgamma,egamma
+    fgamma, egamma
 end
 
 function make_infs(foil::Foil; ϵ=1e-10)
@@ -323,9 +382,12 @@ function body_to_wake!(wake::Wake, foil::Foil)
     @. texp = (atan(y, x2) - atan(y, x1)) / (2π)
     @. xc = lexp * cos(β) - texp * sin(β)
     @. yc = lexp * sin(β) + texp * cos(β)
-    wake.uv = [xc * foil.σs yc * foil.σs]'
+    wake.uv .+= [xc * foil.σs yc * foil.σs]'
     #cirulatory effects    
-
+    # Γs = -[diff(foil.μs)... diff(foil.μ_edge) -foil.μ_edge[end]]
+    # ps =  [foil.foil[:, 2:end-1] foil.edge[:,2:end]]
+    # Γs = -[diff(foil.μs)... ]
+    # ps =  foil.foil[:, 2:end-1]
     fg,eg = get_circulations(foil)
     Γs = [fg... eg...]
     ps = [foil.foil foil.edge]
@@ -341,7 +403,7 @@ function vortex_to_target(sources, targets, Γs; δ=flow.δ)
     for i = 1:ns
         dx = targets[1, :] .- sources[1, i]
         dy = targets[2, :] .- sources[2, i]
-        @. vel = Γs[i] / (2π * (dx^2 + dy^2 + δ^2))
+        @. vel = Γs[i] / (2π * sqrt((dx^2 + dy^2)^2 + δ^4))
         @. vels[1, :] += dy * vel
         @. vels[2, :] -= dx * vel
     end
@@ -349,10 +411,11 @@ function vortex_to_target(sources, targets, Γs; δ=flow.δ)
 end
 
 function release_vortex!(wake::Wake, foil::Foil)
-    wake.xy = [wake.xy foil.edge[:, end]]
-    # wake.xy = [wake.xy foil.edge[:, 2]]
+    # wake.xy = [wake.xy foil.edge[:, end]]
+    wake.xy = [wake.xy foil.edge[:, 2]]
     wake.Γ =  [wake.Γ..., (foil.μ_edge[1] - foil.μ_edge[2])]
-    wake.uv = [wake.uv [0.0, 0.0]]
+    # Set all back to zero for the next time step
+    wake.uv = [wake.uv.*0.0 [0.0, 0.0]] 
     nothing
 end
 
@@ -385,15 +448,12 @@ function plot_current(foil::Foil, wake::Wake; window = nothing)
     plot!(a, foil.edge[1, :], foil.edge[2, :], label="")
     plot!(a, wake.xy[1, :], wake.xy[2, :],
         # markersize=wake.Γ .* 10, st=:scatter, label="",
-        markersize=3, st=:scatter, label="", msw=0, xlims=xs,
-        marker_z =wake.Γ , #/mean(abs.(wake.Γ)),
+        markersize= 3, st=:scatter, label="", msw=0, xlims=xs,
+        marker_z = wake.Γ , #/mean(abs.(wake.Γ)),
         color= cgrad(:coolwarm),
         clim = (-max_val, max_val))
     a
 end
-
-# plot_current(foil,wake; window= (minimum(foil.foil[1,:]')-foil.chord/2.0, maximum(foil.foil[1,:])+foil.chord*5))
-# plot_current(foil,wake)
                                 
 
 function plot_with_normals(foil::Foil)
@@ -438,6 +498,7 @@ function get_dmudt!(foil::Foil, flow::FlowParams)
     old_mus[1,:] = foil.μs
     foil.μs/flow.Δt, old_mus
 end
+
 #after init
 function get_dmudt!(old_mus, foil::Foil, flow::FlowParams)
     dmudt = (3 * foil.μs - 4 * old_mus[1, :] + old_mus[2, :]) / (2 *flow.Δt)
@@ -445,6 +506,7 @@ function get_dmudt!(old_mus, foil::Foil, flow::FlowParams)
     old_mus[1,:] = foil.μs
     dmudt, old_mus
 end
+
 function get_dphidt!(oldphi, ind_flow, flow::FlowParams)
     dmudt = (3 * ind_flow - 4 * oldphi[1, :] + oldphi[2, :]) / (2 *flow.Δt)
     oldphi = circshift(oldphi, (1, 0))
@@ -452,49 +514,58 @@ function get_dphidt!(oldphi, ind_flow, flow::FlowParams)
     dmudt, oldphi
 end
 
+function edge_to_body(foil::Foil)
+    Γs = [-foil.μ_edge[1] foil.μ_edge[1]]
+    ps = foil.edge[:,1:2]
+    vortex_to_target(ps, foil.col, Γs)    
+end
+
 rotate(α) = [cos(α) -sin(α)
              sin(α)  cos(α)]
 begin
-    foil, flow = init_params(; N=50, T=Float64, motion=:no_motion,f=0.5, k=0.5)
+    foil, flow = init_params(; N=50, T=Float64, motion=:no_motion,f=1.0, k=0.5)
+    # foil, flow = init_params(; N=50, T=Float64, motion=:make_heave_pitch,
+    #                             f=1/4/π,  motion_parameters=[-0.1, π/20])
     # flow.δ /=2
-    aoa = rotate(4*pi/180)'
+    aoa = rotate(2.5*pi/180)'
     foil._foil = (foil._foil'*aoa')'
     wake = Wake(foil)
-
-    movie = @animate for i = 1:flow.N*4
+    (foil)(flow)
+    movie = @animate for i = 1:flow.N
         # begin
         A, rhs, edge_body = make_infs(foil)
         setσ!(foil,  flow)
         wake_ind = vortex_to_target(wake.xy, foil.col, wake.Γ)
         normal_wake_ind = sum(wake_ind .* foil.normals, dims =1 )'
-        foil.σs += normal_wake_ind[:]
+        foil.σs -= normal_wake_ind[:]
         buff = edge_body * foil.μ_edge[1]
-        # B =  -rhs * (foil.σs - normal_wake_ind)  - buff 
         foil.μs = A \ (-rhs * foil.σs - buff)[:]      
         set_edge_strength!(foil)
         cancel_buffer_Γ!(wake, foil)
         # fully defined system, how is Kelvin?
         fg,eg = get_circulations(foil)
+        # @show eg
         @assert sum(fg)+sum(eg)+sum(wake.Γ) <1e-15
-
+        #DETERMINE Velocities onto the wake and move it        
         body_to_wake!(wake, foil)
         wake_self_vel!(wake, flow)        
         move_wake!(wake, flow)
-        # Kutta condition!
-        
+        # Kutta condition!        
         @assert (-foil.μs[1] + foil.μs[end] - foil.μ_edge[1]) == 0.0
-        win= (minimum(foil.foil[1,:]')-foil.chord/2.0, maximum(foil.foil[1,:])+foil.chord*5)
+
+        win= (minimum(foil.foil[1,:]')-foil.chord/2.0, maximum(foil.foil[1,:])+foil.chord*2)
         wm = maximum(foil.foil[1,:]')
-        win= (wm-1.2, wm+1.1)
+        # win= (wm-1.2, wm+1.1)
         win= (wm-0.1, wm+.1)
         a = plot_current(foil, wake; window=win)
-        plot!(a, [foil.edge[1,2],foil.edge[1,2]+10.],[foil.edge[2,2],foil.edge[2,2]], color=:green)
+        # a = plot_current(foil, wake)
+        # plot!(a, [foil.edge[1,2],foil.edge[1,2]+10.],[foil.edge[2,2],foil.edge[2,2]], color=:green)
         a
         
         # @show sum(fg),sum(eg),sum(wake.Γ)
-        # @show eg[2] - sum(wake.Γ)
+        # @show eg[2] - sum(wake.Γ)        
+        release_vortex!(wake, foil)        
         (foil)(flow)
-        release_vortex!(wake, foil)
     end
     fg,eg = get_circulations(foil)
     @show sum(fg),sum(eg),sum(wake.Γ)
@@ -503,7 +574,7 @@ begin
 
 end
 #Plot the deviation of the last particles y position from release height
-plot(foil.edge[2,2].-wake.xy[2,end:-1:end-50],marker=:circle)
+plot(foil.edge[2,2].-wake.xy[2,end:-1:end-150],marker=:circle)
  """
     run_sim(; steps = flow.N*10, aoa = rotate(-0*pi/180)')
 
@@ -513,7 +584,7 @@ TBW
 function run_sim(; steps = flow.N*10, aoa = rotate(-4*pi/180)',motion=:no_motion, nfoil = 128)    
     # Initialize the foil and flow parameters
     foil, flow = init_params(; N=nfoil, T=Float64, motion=motion)    
-    # flow.δ *=0.5
+    flow.δ *=1
     # Rotate the foil based on the angle of attack (aoa)
     foil._foil = (foil._foil' * aoa)'
     # Create a wake object for the foil
@@ -534,17 +605,19 @@ function run_sim(; steps = flow.N*10, aoa = rotate(-4*pi/180)',motion=:no_motion
         buff = edge_body * foil.μ_edge[1]        
         foil.μs = A \ (-rhs *foil.σs  - buff)[:]        
         set_edge_strength!(foil)        
-        cancel_buffer_Γ!(wake, foil)        
+        cancel_buffer_Γ!(wake, foil)                
         body_to_wake!(wake, foil)        
-        wake_self_vel!(wake, flow)    
+        wake_self_vel!(wake, flow)
+        wake_ind += edge_to_body(foil)
+        normal_wake_ind = sum(wake_ind .* foil.normals, dims=1 )'
         dmudt, old_mus   = get_dmudt!(old_mus, foil, flow)    
         dphidt, old_phis = get_dphidt!(old_phis, normal_wake_ind, flow)   
 
         qt = get_qt(foil)        
         qt .+=  repeat((foil.σs)',2,1) .* foil.normals  .+ normal_wake_ind'        
-        p_s =  sum((qt - wake_ind) .^ 2, dims=1) / 2.        
-        p_us = dmudt'  - (qt[1,:]'.*(-flow.Uinf .+ foil.panel_vel[1,:]' ) 
-                                     .+ qt[2,:]'.*(foil.panel_vel[2,:]' ))         
+        p_s =  sum((qt  + wake_ind) .^ 2, dims=1) / 2.        
+        p_us = dmudt' + dphidt' - (qt[1,:]'.*(-flow.Uinf .+ foil.panel_vel[1,:]' ) 
+                                .+ qt[2,:]'.*(foil.panel_vel[2,:]' ))         
         # p_us = -flow.ρ.*dmudt' - flow.ρ.*(qt[1,:]'.*(-flow.Uinf .+ foil.panel_vel[1,:]' .- normal_wake_ind[1,:]) 
                                     #    .+ qt[2,:]'.*(foil.panel_vel[2,:]' .- normal_wake_ind[2,:] ))     
         # Calculate the total pressure coefficient
@@ -565,7 +638,7 @@ end
 begin   
     cps = []
     cpus = []
-    foil,wake = run_sim(;steps=flow.N*2,  aoa = rotate(2.5*pi/180)',motion=:no_motion,nfoil=64);
+    foil,wake = run_sim(;steps=flow.N,  aoa = rotate(-2.5*pi/180)',motion=:no_motion,nfoil=64);
     # plot(foil.col[1,:], cps[end][:], yflip=true, label="steady")
     # plot!(foil.col[1,:], cpus[end][:], yflip=true, label="unsteady")
     plot(foil.col[1,:], cps[end][:], yflip=true, label="total",ls=:dash)
