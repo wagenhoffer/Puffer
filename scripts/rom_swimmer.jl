@@ -193,7 +193,7 @@ function move_edge!(foil::Foil, flow::FlowParams)
     edge_vec  = [(foil.tangents[1, end] - foil.tangents[1, 1]), (foil.tangents[2, end] - foil.tangents[2, 1]) ]
     edge_vec  ./= norm(edge_vec) 
     edge_vec = flow.Uinf * flow.Δt * edge_vec 
-    foil.edge = [foil.foil[:, end] (foil.foil[:, end] .+ 0.25*edge_vec) (foil.foil[:, end] .+ 1.25 * edge_vec)]
+    foil.edge = [foil.foil[:, end] (foil.foil[:, end] .+ 0.4*edge_vec) (foil.foil[:, end] .+ 1.4 * edge_vec)]
     nothing
 end
 
@@ -448,8 +448,8 @@ function plot_current(foil::Foil, wake::Wake; window = nothing)
     plot!(a, foil.edge[1, :], foil.edge[2, :], label="")
     plot!(a, wake.xy[1, :], wake.xy[2, :],
         # markersize=wake.Γ .* 10, st=:scatter, label="",
-        markersize= 3, st=:scatter, label="", msw=0, xlims=xs,
-        marker_z = wake.Γ , #/mean(abs.(wake.Γ)),
+        markersize=3, st=:scatter, label="", msw=0, xlims=xs,
+        marker_z =wake.Γ , #/mean(abs.(wake.Γ)),
         color= cgrad(:coolwarm),
         clim = (-max_val, max_val))
     a
@@ -530,7 +530,7 @@ begin
     aoa = rotate(2.5*pi/180)'
     foil._foil = (foil._foil'*aoa')'
     wake = Wake(foil)
-    (foil)(flow)
+    # (foil)(flow)
     movie = @animate for i = 1:flow.N
         # begin
         A, rhs, edge_body = make_infs(foil)
@@ -544,7 +544,6 @@ begin
         cancel_buffer_Γ!(wake, foil)
         # fully defined system, how is Kelvin?
         fg,eg = get_circulations(foil)
-        # @show eg
         @assert sum(fg)+sum(eg)+sum(wake.Γ) <1e-15
         #DETERMINE Velocities onto the wake and move it        
         body_to_wake!(wake, foil)
@@ -638,7 +637,7 @@ end
 begin   
     cps = []
     cpus = []
-    foil,wake = run_sim(;steps=flow.N,  aoa = rotate(-2.5*pi/180)',motion=:no_motion,nfoil=64);
+    foil,wake = run_sim(;steps=flow.N*3,  aoa = rotate(-2.5*pi/180)',motion=:no_motion,nfoil=64);
     # plot(foil.col[1,:], cps[end][:], yflip=true, label="steady")
     # plot!(foil.col[1,:], cpus[end][:], yflip=true, label="unsteady")
     plot(foil.col[1,:], cps[end][:], yflip=true, label="total",ls=:dash)
