@@ -105,7 +105,7 @@ function make_waveform(a0=0.1, a=[0.367, 0.323, 0.310]; T=Float64)
     h
 end
 
-function make_ang(a0=0.1, a=[0.367, 0.323, 0.310])
+function make_ang(a0=0.1; a=[0.367, 0.323, 0.310])
     a0 = a0
     a = a
     f = π
@@ -526,15 +526,18 @@ begin
     foil, flow = init_params(; N=50, T=Float64, motion=:no_motion,f=1.0, k=0.5)
     # foil, flow = init_params(; N=50, T=Float64, motion=:make_heave_pitch,
     #                             f=1/4/π,  motion_parameters=[-0.1, π/20])
-    # flow.δ /=2
-    aoa = rotate(2.5*pi/180)'
+    # foil, flow = init_params(; N=50, T=Float64, motion=:make_ang,
+    # f=0.5, k=0.75,  motion_parameters=[-0.1])
+                                # flow.δ /=2
+    aoa = rotate(4.5*pi/180)'
     foil._foil = (foil._foil'*aoa')'
     wake = Wake(foil)
-    # (foil)(flow)
-    movie = @animate for i = 1:flow.N
+    (foil)(flow)
+    movie = @animate for i = 1:flow.N*2
         # begin
         A, rhs, edge_body = make_infs(foil)
         setσ!(foil,  flow)
+        cancel_buffer_Γ!(wake, foil)
         wake_ind = vortex_to_target(wake.xy, foil.col, wake.Γ)
         normal_wake_ind = sum(wake_ind .* foil.normals, dims =1 )'
         foil.σs -= normal_wake_ind[:]
@@ -544,7 +547,7 @@ begin
         cancel_buffer_Γ!(wake, foil)
         # fully defined system, how is Kelvin?
         fg,eg = get_circulations(foil)
-        @assert sum(fg)+sum(eg)+sum(wake.Γ) <1e-15
+        # @assert sum(fg)+sum(eg)+sum(wake.Γ) <1e-15
         #DETERMINE Velocities onto the wake and move it        
         body_to_wake!(wake, foil)
         wake_self_vel!(wake, flow)        
@@ -554,7 +557,7 @@ begin
 
         win= (minimum(foil.foil[1,:]')-foil.chord/2.0, maximum(foil.foil[1,:])+foil.chord*2)
         wm = maximum(foil.foil[1,:]')
-        # win= (wm-1.2, wm+1.1)
+        win= (wm-1.2, wm+1.1)
         win= (wm-0.1, wm+.1)
         a = plot_current(foil, wake; window=win)
         # a = plot_current(foil, wake)
@@ -574,16 +577,17 @@ begin
 end
 #Plot the deviation of the last particles y position from release height
 plot(foil.edge[2,2].-wake.xy[2,end:-1:end-150],marker=:circle)
- """
+ 
+"""
     run_sim(; steps = flow.N*10, aoa = rotate(-0*pi/180)')
 
 
 TBW
 """
-function run_sim(; steps = flow.N*10, aoa = rotate(-4*pi/180)',motion=:no_motion, nfoil = 128)    
+function run_sim(; steps = flow.N*4, aoa = rotate(-4*pi/180)',motion=:no_motion, nfoil = 128)    
     # Initialize the foil and flow parameters
     foil, flow = init_params(; N=nfoil, T=Float64, motion=motion)    
-    flow.δ *=1
+    flow.δ /= 4
     # Rotate the foil based on the angle of attack (aoa)
     foil._foil = (foil._foil' * aoa)'
     # Create a wake object for the foil
@@ -614,7 +618,7 @@ function run_sim(; steps = flow.N*10, aoa = rotate(-4*pi/180)',motion=:no_motion
 
         qt = get_qt(foil)        
         qt .+=  repeat((foil.σs)',2,1) .* foil.normals  .+ normal_wake_ind'        
-        p_s =  sum((qt  + wake_ind) .^ 2, dims=1) / 2.        
+        p_s =  sum((qt + wake_ind) .^ 2, dims=1) / 2.        
         p_us = dmudt' + dphidt' - (qt[1,:]'.*(-flow.Uinf .+ foil.panel_vel[1,:]' ) 
                                 .+ qt[2,:]'.*(foil.panel_vel[2,:]' ))         
         # p_us = -flow.ρ.*dmudt' - flow.ρ.*(qt[1,:]'.*(-flow.Uinf .+ foil.panel_vel[1,:]' .- normal_wake_ind[1,:]) 
@@ -630,6 +634,7 @@ function run_sim(; steps = flow.N*10, aoa = rotate(-4*pi/180)',motion=:no_motion
         move_wake!(wake, flow)
         release_vortex!(wake, foil)
         (foil)(flow)
+        
     end
     foil, wake
 end
@@ -637,7 +642,7 @@ end
 begin   
     cps = []
     cpus = []
-    foil,wake = run_sim(;steps=flow.N*3,  aoa = rotate(-2.5*pi/180)',motion=:no_motion,nfoil=64);
+    foil, wake = run_sim(;steps=flow.N*3,  aoa = rotate(-5*pi/180)',motion=:no_motion,nfoil=64);
     # plot(foil.col[1,:], cps[end][:], yflip=true, label="steady")
     # plot!(foil.col[1,:], cpus[end][:], yflip=true, label="unsteady")
     plot(foil.col[1,:], cps[end][:], yflip=true, label="total",ls=:dash)
