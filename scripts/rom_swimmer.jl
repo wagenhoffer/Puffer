@@ -32,6 +32,7 @@ using StaticArrays
 using ForwardDiff
 using BSplineKit
 using Statistics 
+using SpecialFunctions
 """ data types """
 abstract type Body end
 
@@ -116,18 +117,12 @@ function make_ang(a0=0.1; a=[0.367, 0.323, 0.310])
     h
 end
 
-function make_heave_pitch(h0, θ0; T= Float64)
-    θ(f,ψ,t) = θ0*sin(2π*f*t + ψ)
-    h(f,t) = h0*sin(2π*f*t)
-    [θ,h]
-end
-
 function no_motion(;T=Float64)
     sig(x,f,k,t) = 0.0
 end
 
 function angle_of_attack(;aoa = 5, T=Float64)
-    sig(x,f,k,t) = rotate(-aoa*pi/180)'
+    sig(x,f,k,t) = rotation(-aoa*pi/180)'
 end
 
 function norms(foil)
@@ -193,7 +188,9 @@ function move_edge!(foil::Foil, flow::FlowParams)
     edge_vec  = [(foil.tangents[1, end] - foil.tangents[1, 1]), (foil.tangents[2, end] - foil.tangents[2, 1]) ]
     edge_vec  ./= norm(edge_vec) 
     edge_vec = flow.Uinf * flow.Δt * edge_vec 
-    foil.edge = [foil.foil[:, end] (foil.foil[:, end] .+ 0.4*edge_vec) (foil.foil[:, end] .+ 1.4 * edge_vec)]
+    # foil.edge = [foil.foil[:, end] (foil.foil[:, end] .+ 0.4*edge_vec) (foil.foil[:, end] .+ 1.4 * edge_vec)]
+    #The edge starts at the TE -> advects some scale down -> the last midpoint
+    foil.edge = [foil.foil[:, end] (foil.foil[:, end] .+ 0.5*edge_vec) foil.edge[:, 2] ]
     nothing
 end
 
@@ -209,11 +206,12 @@ function (foil::Foil)(flow::FlowParams)
     #perform kinematics
     #TODO: only modifies the y-coordinates
     
-    if typeof(foil.kine) == Vector{Function}
-        θ = foil.kine[1](foil.f,flow.n*flow.Δt, -π/2)
-        h = foil.kine[2](foil.f,flow.n*flow.Δt)
-        foil.foil[1,:] = foil._foil[1,:] *cos(θ) -  foil._foil[2,:] *sin(θ) #.+ foil.foil[1,foil.N÷2]
-        foil.foil[2,:] = foil._foil[1,:] *sin(θ) +  foil._foil[2,:] *cos(θ) .+ h 
+    if typeof(foil.kine) == Vector{Function}        
+        h = foil.kine[1](foil.f, flow.n*flow.Δt)
+        θ = foil.kine[2](foil.f, flow.n*flow.Δt, -π/2)
+        # foil.foil = (foil._foil'*rotation(θ))'
+        rotate_about!(foil,θ)
+        foil.foil[2,:] .+= h
         #Advance the foil in flow
         foil.foil .+= [-flow.Uinf, 0] .* flow.Δt .*flow.n  
     else
@@ -227,18 +225,52 @@ function (foil::Foil)(flow::FlowParams)
     flow.n += 1
 end
 
+
+function rotate_about!(foil, θ; chord_loc = 0.0)
+    foil.foil = ([foil._foil[1,:].-chord_loc foil._foil[2,:]]*rotation(θ))'
+    foil.foil[1,:] .+= chord_loc
+end
+
+
+
+function make_heave_pitch(h0, θ0; T= Float64)
+    θ(f,t,ψ) = θ0*sin(2*π* f*t + ψ)
+    h(f,t) = h0*sin(2*π* f*t)
+    [h,θ]
+end
 begin
     # Visualizations for heaving and pitching motions
     foil, flow = init_params(; N=50, T=Float64, motion=:make_heave_pitch,
-                               f=1/(2π),  motion_parameters=[-2, π/20])
+                               f=1,  motion_parameters=[0.0, π/40])
     a = plot()
-    for i=1:flow.N*1
+    movie = @animate for i=1:flow.N*1
+        (foil)(flow)  
+        plot(a, foil.foil[1,:],foil.foil[2,:],aspect_ratio=:equal, label="",ylims=(-0.5,0.5))  
+    end
+    a
+    gif(movie, "flapping.gif", fps=60)
+end
+begin
+    # Visualizations for heaving and pitching motions
+    foil, flow = init_params(; N=50, T=Float64, motion=:make_ang,
+                               f=1.0,k=1.0,  motion_parameters=[0.1])
+    a = plot()
+    for i=1:flow.N*1 +1
         (foil)(flow)
-        plot!(a, foil.foil[1,:],foil.foil[2,:],aspect_ratio=:equal, label="",color=:red)
+        if i%25 == 0
+            plot!(a, foil.foil[1,:] ,foil.foil[2,:] .+ 0.25,
+                    aspect_ratio=:equal, label="")
+        end
+    end
+    for i=1:flow.N*1 +1
+        (foil)(flow)
+        
+            plot!(a, foil.foil[1,:] .+ 1.0,foil.foil[2,:] .- 0.25,
+                    aspect_ratio=:equal, label="")
+        
     end
     a
 end
-
 """
     get_panel_vels(foil::Foil,fp::FlowParams)
 
@@ -269,8 +301,8 @@ function get_panel_vels!(foil::Foil, fp::FlowParams)
     col = get_mdpts(foil._foil)
     #TODO switch to a s-exp label dispatch
     if typeof(foil.kine) == Vector{Function}
-        theta(t) = foil.kine[1](foil.f, t, -π/2 )
-        heave(t) = foil.kine[2](foil.f, t)
+        theta(t) = foil.kine[2](foil.f, t, -π/2 )
+        heave(t) = foil.kine[1](foil.f, t)
         dx(t) = col[1,:] *cos(theta(t)) -  col[2,:] *sin(theta(t))
         dy(t) = col[1,:] *sin(theta(t)) +  col[2,:] *cos(theta(t)) .+ heave(t)
         
@@ -449,7 +481,7 @@ function plot_current(foil::Foil, wake::Wake; window = nothing)
     plot!(a, wake.xy[1, :], wake.xy[2, :],
         # markersize=wake.Γ .* 10, st=:scatter, label="",
         markersize=3, st=:scatter, label="", msw=0, xlims=xs,
-        marker_z =wake.Γ , #/mean(abs.(wake.Γ)),
+        marker_z = -wake.Γ , #/mean(abs.(wake.Γ)),
         color= cgrad(:coolwarm),
         clim = (-max_val, max_val))
     a
@@ -520,20 +552,20 @@ function edge_to_body(foil::Foil)
     vortex_to_target(ps, foil.col, Γs)    
 end
 
-rotate(α) = [cos(α) -sin(α)
+rotation(α) = [cos(α) -sin(α)
              sin(α)  cos(α)]
 begin
-    foil, flow = init_params(; N=50, T=Float64, motion=:no_motion,f=1.0, k=0.5)
-    # foil, flow = init_params(; N=50, T=Float64, motion=:make_heave_pitch,
-    #                             f=1/4/π,  motion_parameters=[-0.1, π/20])
+    # foil, flow = init_params(; N=50, T=Float64, motion=:no_motion,f=0.1, k=0.0)
+    foil, flow = init_params(; N=50, T=Float64, motion=:make_heave_pitch,
+                                f=0.25,  motion_parameters=[-0.0, π/20])
     # foil, flow = init_params(; N=50, T=Float64, motion=:make_ang,
     # f=0.5, k=0.75,  motion_parameters=[-0.1])
                                 # flow.δ /=2
-    aoa = rotate(4.5*pi/180)'
+    aoa = rotation(8*pi/180)'
     foil._foil = (foil._foil'*aoa')'
     wake = Wake(foil)
     (foil)(flow)
-    movie = @animate for i = 1:flow.N*2
+    movie = @animate for i = 1:flow.N
         # begin
         A, rhs, edge_body = make_infs(foil)
         setσ!(foil,  flow)
@@ -559,8 +591,8 @@ begin
         wm = maximum(foil.foil[1,:]')
         win= (wm-1.2, wm+1.1)
         win= (wm-0.1, wm+.1)
-        a = plot_current(foil, wake; window=win)
-        # a = plot_current(foil, wake)
+        # a = plot_current(foil, wake; window=win)
+        a = plot_current(foil, wake)
         # plot!(a, [foil.edge[1,2],foil.edge[1,2]+10.],[foil.edge[2,2],foil.edge[2,2]], color=:green)
         a
         
@@ -584,10 +616,12 @@ plot(foil.edge[2,2].-wake.xy[2,end:-1:end-150],marker=:circle)
 
 TBW
 """
-function run_sim(; steps = flow.N*4, aoa = rotate(-4*pi/180)',motion=:no_motion, nfoil = 128)    
+function run_sim(; steps = flow.N*4, aoa = rotation(0)',motion=:no_motion, 
+                   motion_parameters=nothing, nfoil = 128, f=1)    
     # Initialize the foil and flow parameters
-    foil, flow = init_params(; N=nfoil, T=Float64, motion=motion)    
-    flow.δ /= 4
+    foil, flow = init_params(; N=nfoil, T=Float64, motion=motion, f=f, motion_parameters=motion_parameters)    
+    # flow.δ /= 4
+    den = 1/2 *(flow.ρ*flow.Uinf^2*foil.chord)
     # Rotate the foil based on the angle of attack (aoa)
     foil._foil = (foil._foil' * aoa)'
     # Create a wake object for the foil
@@ -595,9 +629,8 @@ function run_sim(; steps = flow.N*4, aoa = rotate(-4*pi/180)',motion=:no_motion,
     # Initialize the previous time step's vorticity values
     old_mus = zeros(3, foil.N)
     old_phis = zeros(3, foil.N)
-    # Initialize arrays to store the pressure coefficients over time
-    # cpus = []
-    # cps = []
+    #coefficients of force, lift, thrust, power
+    coeffs = zeros(4,steps)
     (foil)(flow)
     for i = 1:steps               
         A, rhs, edge_body = make_infs(foil)        
@@ -610,41 +643,57 @@ function run_sim(; steps = flow.N*4, aoa = rotate(-4*pi/180)',motion=:no_motion,
         set_edge_strength!(foil)        
         cancel_buffer_Γ!(wake, foil)                
         body_to_wake!(wake, foil)        
-        wake_self_vel!(wake, flow)
-        wake_ind += edge_to_body(foil)
-        normal_wake_ind = sum(wake_ind .* foil.normals, dims=1 )'
-        dmudt, old_mus   = get_dmudt!(old_mus, foil, flow)    
-        dphidt, old_phis = get_dphidt!(old_phis, normal_wake_ind, flow)   
-
-        qt = get_qt(foil)        
-        qt .+=  repeat((foil.σs)',2,1) .* foil.normals  .+ normal_wake_ind'        
-        p_s =  sum((qt + wake_ind) .^ 2, dims=1) / 2.        
-        p_us = dmudt' + dphidt' - (qt[1,:]'.*(-flow.Uinf .+ foil.panel_vel[1,:]' ) 
-                                .+ qt[2,:]'.*(foil.panel_vel[2,:]' ))         
-        # p_us = -flow.ρ.*dmudt' - flow.ρ.*(qt[1,:]'.*(-flow.Uinf .+ foil.panel_vel[1,:]' .- normal_wake_ind[1,:]) 
-                                    #    .+ qt[2,:]'.*(foil.panel_vel[2,:]' .- normal_wake_ind[2,:] ))     
-        # Calculate the total pressure coefficient
-        """
-        ∫∞→Px1 d(∇×Ψ)/dt dC + dΦ/dt|body - (VG + VGp + (Ω×r))⋅∇Φ + 1/2||∇Φ +(∇×Ψ)|^2  = Pinf - Px1 /ρ
-        """
-        p = p_s + p_us        
-        coeff_p = -flow.ρ * p ./ (0.5*flow.ρ*flow.Uinf^2)        
-        push!(cpus, p_us ./ (0.5*flow.ρ*flow.Uinf^2))
-        push!(cps, coeff_p )    
+        wake_self_vel!(wake, flow)  
+        p, old_mus, old_phis = panel_pressure(foil, wake_ind, old_mus, old_phis)       
+        
+        coeff_p = -flow.ρ * p ./ den
+        push!(cps, coeff_p ) 
+        ### testing
+        dforce = repeat(-p.*foil.panel_lengths',2,1).*foil.normals
+        dpress = sum(dforce.*foil.panel_vel,dims=2)
+        force = sum(dforce,dims=2)
+        lift = force[1]
+        thrust = force[2]
+        power = sum(dpress, dims=1)[1]
+        
+        coeffs[1,i] = sum(sqrt.(force.^2)) #C_forces
+        coeffs[2,i] = lift    #C_lift
+        coeffs[3,i] = thrust
+        coeffs[4,i] = power/flow.Uinf      #C_power
+        coeffs ./= den
         move_wake!(wake, flow)
         release_vortex!(wake, foil)
         (foil)(flow)
         
     end
-    foil, wake
+    foil, wake,coeffs
+end
+function panel_pressure(foil::Foil, wake_ind, old_mus, old_phis)
+    # wake_ind += edge_to_body(foil)
+    normal_wake_ind = sum(wake_ind .* foil.normals, dims=1 )'
+    dmudt, old_mus   = get_dmudt!(old_mus, foil, flow)    
+    dphidt, old_phis = get_dphidt!(old_phis, normal_wake_ind, flow)   
+
+    qt   = get_qt(foil)        
+    qt .+= repeat((foil.σs)',2,1) .* foil.normals  .+ normal_wake_ind'        
+    p_s  = sum((qt + wake_ind) .^ 2, dims=1) / 2.        
+    p_us = dmudt' + dphidt' - (qt[1,:]'.*(-flow.Uinf .+ foil.panel_vel[1,:]' ) 
+                            .+ qt[2,:]'.*(foil.panel_vel[2,:]' ))         
+  
+    # Calculate the total pressure coefficient
+    """
+    ∫∞→Px1 d(∇×Ψ)/dt dC + dΦ/dt|body - (VG + VGp + (Ω×r))⋅∇Φ + 1/2||∇Φ +(∇×Ψ)|^2  = Pinf - Px1 /ρ
+    """
+    p = p_s + p_us            
+    p, old_mus, old_phis
 end
 
 begin   
     cps = []
-    cpus = []
-    foil, wake = run_sim(;steps=flow.N*3,  aoa = rotate(-5*pi/180)',motion=:no_motion,nfoil=64);
+    foil, wake, coeffs = run_sim(;steps=flow.N*3,  aoa = rotation(-5*pi/180)',motion=:no_motion, nfoil=64, f=0.015);
+    # foil, wake,coeffs = run_sim(;steps=flow.N*3, f=0.25, motion=:make_heave_pitch, motion_parameters=[0.0, π/20], nfoil=64);
     # plot(foil.col[1,:], cps[end][:], yflip=true, label="steady")
-    # plot!(foil.col[1,:], cpus[end][:], yflip=true, label="unsteady")
+    
     plot(foil.col[1,:], cps[end][:], yflip=true, label="total",ls=:dash)
     # plot!(foil.col[1,:], cps[end][:] + cpus[end][:], yflip=true, label="total",ls=:dash)
     plot!(foil.col[1,:], -foil.col[2,:], label="", yflip=true)
@@ -667,22 +716,62 @@ begin
 
 end
 
-begin 
-    # dmudt, old_mus = get_dmudt!(old_mus, foil, flow)
-    qt = get_qt(foil)        
-    qt .+=  repeat((foil.σs)',2,1) .* foil.normals  .+ normal_wake_ind'        
-    p_s = flow.ρ * sum((qt + wake_ind) .^ 2, dims=1) / 2.        
-    p_us = -flow.ρ.*(dmudt'-dphidt') - flow.ρ.*(qt[1,:]'.*(-flow.Uinf .+ foil.panel_vel[1,:]' ) 
-                                    .+ qt[2,:]'.*(foil.panel_vel[2,:]' ))                                                                                           
-    """
-    ∫∞→Px1 d(∇×Ψ)/dt dC + dΦ/dt|body - (VG + VGp + (Ω×r))⋅∇Φ + 1/2||∇Φ +(∇×Ψ)|^2  = Pinf - Px1 /ρ
-    """
-    p    = -p_s - p_us
-    coeff_p   = p ./ (0.5*flow.ρ*flow.Uinf^2)
-    mid = foil.N ÷2 
-    plot(foil.col[1,1:mid+1], coeff_p[1:mid+1], yflip=true, label="bottom",shape=:circle, color=:blue)        
-    plot!(foil.col[1,mid+1:end], coeff_p[mid+1:end], yflip=true, label="top",shape=:circle,color=:red)        
-    plot!(foil.col[1,:], -foil.col[2,:], label="", yflip=true)
+begin
+    ##Theodorsen comparisons
+    # Load input parameters
+    N_STEP = 150 
+    N_CYC = 3
+   
+    tau = range(0, length=N_STEP*N_CYC, stop=N_CYC)
+
+    # Define constants
+    b = 0.5 * foil.chord
+    a = -0.25
+    w = 2.0 * pi *foil.f
+    t = tau
+    RHO = flow.ρ
+    U = abs(1)
+    theta_max = θ0 =   π/20
+    heave_max = 0.1*foil.chord
+    PHI = -π/2
+
+    k = w * b / U
+    k2 = π *foil.f * foil.chord / U
+    St = 2.0 *foil.f * heave_max / U
+
+    F = (besselj1(k)*(besselj1(k)+bessely0(k)) + bessely1(k)*(bessely1(k)-besselj0(k))) / ((besselj1(k)+bessely0(k))^2 + (bessely1(k)-besselj0(k))^2)
+    G = -(bessely1(k)*bessely0(k) + besselj1(k)*besselj0(k)) / ((besselj1(k)+bessely0(k))^2 + (bessely1(k)-besselj0(k))^2)
+    L = zeros(size(t))
+    L2 = zeros(size(t))
+    @. L = -RHO * b^2 * (U * pi * theta_max * w * cos(w * t + PHI) - pi * heave_max * w^2 * sin(w * t) + pi * b * a * theta_max * w^2 * sin(w * t + PHI)) -
+        2.0 * pi * RHO * U * b * F * (U * theta_max * sin(w * t + PHI) + heave_max * w * cos(w * t) + b * (0.5 - a) * theta_max * w * cos(w * t + PHI)) -
+        2.0 * pi * RHO * U * b * G * (U * theta_max * cos(w * t + PHI) - heave_max * w * sin(w * t) - b * (0.5 - a) * theta_max * w * sin(w * t + PHI))
+    @. L2 = RHO * U^2 *foil.chord * sqrt(R^2+I^2)*real(exp(1im*w*tau))
+    Cl = real.(L) / (0.5 * RHO* U^2 * foil.chord)
+    L2 ./= (0.5 * RHO* U^2 * foil.chord)
+
+    # Plot the results
+    plot(tau, Cl, label="Theodorsen")    
+    plot!(tau, L2)
+
+end
+begin
+    foil, wake,coeffs = run_sim(;steps=flow.N*3, f=0.25, motion=:make_heave_pitch, motion_parameters=[0.0, π/20], nfoil=64);
+    ##GARRICK model
+    t   = flow.Δt:flow.Δt:flow.N*N_CYC*flow.Δt
+    θ0  = π/20
+    ω   = 2π*foil.f
+    a   = -1 #-1 is rotation about leading edge
+    theo   = 1im*hankelh1(1,k)/(hankelh1(0, k)+1im*hankelh1(1,k))
+    F,G = real(theo), imag(theo)
+    R   = π*θ0*(k^2/2*(0.125 + a^2) + (0.5 + a) *(F - (0.5 - a)*k*G))
+    I   = -π*θ0*(k/2*(0.5 - a) - (0.5 + a) *(G + (0.5 - a)*k*F))
+    Φ   = atan(I,R)
+    gar = sqrt.(R.^2+I.^2) # *  0.5* flow.ρ* flow.Uinf^2* foil.chord* 
+    Cl  = gar .* exp.(1im*ω*t)
+    M   = gar .* exp.(1im*ω*t .+ Φ)
+    plot(t,real(Cl))
+    plot!(t[50:end],coeffs[2,50:end].*2000)
 end
 ##BSPLINES FOR determining the dmu along the body
 
@@ -955,7 +1044,18 @@ A = doubletMat + edgeMat
 
 
 
-nf = (foil._foil'*rotate(-3*pi/180)')'
+nf = (foil._foil'*rotation(-3*pi/180)')'
 
 plot(nf[1,:],nf[2,:])
 plot!(foil._foil[1,:],foil._foil[2,:])
+begin
+    θ = pi/4
+    for i=1:foil.N+1
+    # foil.foil = (foil._foil'*rotation(θ))'
+        @show foil._foil[:,i] 
+
+        foil.foil = ([foil._foil[1,:].-0.5 foil._foil[2,:]]*rotation(θ))'
+        foil.foil[1,:] .+= 0.5
+    end
+    plot(foil.foil[1,:], foil.foil[2,:],m=:dot)
+end
