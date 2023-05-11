@@ -9,8 +9,7 @@ export FlowParams, Foil, Wake, make_naca, make_waveform, make_ang, make_heave_pi
         vortex_to_target, release_vortex!, set_edge_strength!, 
         cancel_buffer_Γ!, plot_current, plot_with_normals,
         get_qt,get_phi, get_dmudt!, get_dphidt!, edge_to_body, run_sim, rotation, 
-        get_performance, panel_pressure
-
+        get_performance, panel_pressure, wake_self_vel!,time_increment!
 
 using LinearAlgebra
 using Plots
@@ -194,8 +193,6 @@ Use a functor to advance the time-step
 """
 function (foil::Foil)(flow::FlowParams)
     #perform kinematics
-    #TODO: only modifies the y-coordinates
-
     if typeof(foil.kine) == Vector{Function}
         h = foil.kine[1](foil.f, flow.n * flow.Δt)
         θ = foil.kine[2](foil.f, flow.n * flow.Δt, -π / 2)
@@ -240,7 +237,7 @@ function get_panel_vels(foil::Foil, fp::FlowParams)
     col = get_mdpts(foil._foil)
 
     if typeof(foil.kine) == Vector{Function}
-        theta(t) = foil.kine[1](foil.f, t, -π / 2)
+        theta(t) = foil.kine[1](foil.f, t, - π / 2)
         heave(t) = foil.kine[2](foil.f, t)
         dx(t) = foil._foil[1, :] * cos(theta(t)) - foil._foil[2, :] * sin(theta(t))
         dy(t) = foil._foil[1, :] * sin(theta(t)) + foil._foil[2, :] * cos(theta(t)) .+ heave(t)
@@ -513,7 +510,6 @@ TBW
 """
 function run_sim(; steps=flow.N * 4, aoa=rotation(0)', motion=:no_motion,
     motion_parameters=nothing, nfoil=128, f=1)
-    #TODO if passed foil, flow, wake, resume a sim
     # Initialize the foil and flow parameters
     foil, flow = init_params(; N=nfoil, T=Float64, motion=motion, f=f, motion_parameters=motion_parameters)
     # flow.δ /= 4
@@ -542,14 +538,13 @@ function run_sim(; steps=flow.N * 4, aoa=rotation(0)', motion=:no_motion,
         wake_self_vel!(wake, flow)
         p, old_mus, old_phis = panel_pressure(foil, flow, wake_ind, old_mus, old_phis)
         coeffs[:,i] = get_performance(foil, flow, p)
-        # coeff_p = - p ./ den        
-
+             
         move_wake!(wake, flow)
         release_vortex!(wake, foil)
         (foil)(flow)
 
     end
-    foil, flow,  wake, coeffs ./ den
+    foil, flow,  wake, coeffs 
 end
 
 function get_performance(foil, flow, p)
@@ -585,6 +580,37 @@ function panel_pressure(foil::Foil, flow, wake_ind, old_mus, old_phis)
     """
     p = p_s + p_us
     p, old_mus, old_phis
+end
+
+"""
+    time_increment!(flow::FlowParams, foil::Foil, wake::Wake)
+
+does a single timestep of the simulation. This is the core of the simulation.
+Useful for debugging or for plotting purposes.
+
+Reorder the operations so it ends with a fully defined system. This way we can
+grab metrics of the foil. 
+"""
+function time_increment!(flow::FlowParams, foil::Foil, wake::Wake)
+    if flow.n != 1
+        move_wake!(wake, flow)   
+        release_vortex!(wake, foil)
+    end    
+    (foil)(flow)
+    A, rhs, edge_body = make_infs(foil)
+    setσ!(foil, flow)
+    cancel_buffer_Γ!(wake, foil)
+    wake_ind = vortex_to_target(wake.xy, foil.col, wake.Γ, flow)
+    normal_wake_ind = sum(wake_ind .* foil.normals, dims=1)'
+    foil.σs -= normal_wake_ind[:]
+    buff = edge_body * foil.μ_edge[1]
+    foil.μs = A \ (-rhs*foil.σs-buff)[:]
+    set_edge_strength!(foil)
+    cancel_buffer_Γ!(wake, foil)
+    body_to_wake!(wake, foil, flow)
+    wake_self_vel!(wake, flow)
+    
+    nothing
 end
 
 end

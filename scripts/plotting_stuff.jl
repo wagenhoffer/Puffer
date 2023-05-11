@@ -1,117 +1,64 @@
-begin 
-    n = 25
-    T = LinRange(0, 1, n)
-    
-    anim = @animate for t in T        
-        plot(foil.foil[1,:], 
-        foil.foil[2,:] .+ foil.kine.(foil._foil[1,:],foil.k,foil.f,t),label="",aspect_ratio=:equal)        
-    end
-    gif(anim,"simple.gif", fps=12)
-end
-#FIND body velocities to be plugged into sigma 
-# plot(foil.foil[1,:], foil.foil[2,:] .+ foil.kine.(foil.foil[1,:],foil.k,foil.f,t),label="",aspect_ratio=:equal)        
-begin 
-    old_cols = zeros(5,size(foil.col)...)
-    foil, flow = init_params()
-    for i=1:5       
-        (foil)(flow)
-        old_cols = circshift(old_cols,(1,0,0))
-        old_cols[1,:,:] = foil.col
-        # plot(foil.foil[1,:], foil.foil[2,:],
-        #     label="", 
-        #     aspect_ratio=:equal,
-        #     ylims=(-0.35,0.35),
-        #     xlims=(foil.foil[1,foil.N÷2] - 10*flow.Δt,flow.N*flow.Δt*flow.Uinf))
-    end
-    gif(anim,"simple.gif", fps=50)
-end
-
+using BemRom
+using Plots
 
 begin
-    vels = @animate for i = 1:flow.N
-        plot(foil._foil[1,:],ForwardDiff.derivative.(kine, flow.Δt*i),color=:red,label="vel")
-        plot!(foil.foil[1,:],foil.kine.(foil.foil[1,:],foil.k,foil.f,i*flow.Δt),
-              label="pos",aspect_ratio=:equal,color=:green) 
-        plot!(xlims=(-0.5,1.5), ylims=(-0.6, 0.6))
+    foil, flow = init_params(; N=50, T=Float64, motion=:make_heave_pitch,
+        f=0.25, motion_parameters=[-0.1, π / 20])
+    aoa = rotation(8 * pi / 180)'
+    foil._foil = (foil._foil' * aoa')'
+    wake = Wake(foil)
+    (foil)(flow)
+    movie = @animate for i = 1:flow.N*5
+        # begin
+        A, rhs, edge_body = make_infs(foil)
+        setσ!(foil, flow)
+        cancel_buffer_Γ!(wake, foil)
+        wake_ind = vortex_to_target(wake.xy, foil.col, wake.Γ, flow)
+        normal_wake_ind = sum(wake_ind .* foil.normals, dims=1)'
+        foil.σs -= normal_wake_ind[:]
+        buff = edge_body * foil.μ_edge[1]
+        foil.μs = A \ (-rhs*foil.σs-buff)[:]
+        set_edge_strength!(foil)
+        cancel_buffer_Γ!(wake, foil)
+        fg, eg = get_circulations(foil)
+        # @assert sum(fg)+sum(eg)+sum(wake.Γ) <1e-15
+        #DETERMINE Velocities onto the wake and move it        
+        body_to_wake!(wake, foil, flow)
+        wake_self_vel!(wake, flow)
+        move_wake!(wake, flow)
+        # Kutta condition!        
+        @assert (-foil.μs[1] + foil.μs[end] - foil.μ_edge[1]) == 0.0
+
+        win = (minimum(foil.foil[1, :]') - foil.chord / 2.0, maximum(foil.foil[1, :]) + foil.chord * 2)
+        wm = maximum(foil.foil[1, :]')
+        win = (wm - 1.2, wm + 1.1)
+        win = (wm - 0.1, wm + 0.1)
+        # a = plot_current(foil, wake; window=win)
+        a = plot_current(foil, wake)
+        # plot!(a, [foil.edge[1,2],foil.edge[1,2]+10.],[foil.edge[2,2],foil.edge[2,2]], color=:green)
+        a
+
+        release_vortex!(wake, foil)
+        (foil)(flow)
     end
-    gif(vels,"vels.gif", fps=24)
+    fg, eg = get_circulations(foil)
+    @show sum(fg), sum(eg), sum(wake.Γ)
+
+    gif(movie, "wake.gif", fps=60)
+
 end
 
-k(t) = foil.kine.(foil._foil[1,:],foil.k,foil.f,t)
-c(x) = foil.kine.(x,foil.k,foil.f,1.0)
-
-ForwardDiff.derivative.(sin, 1:0.1:2)
-ForwardDiff.derivative.(k, 1)
-ForwardDiff.derivative(d, 1.0)
-isa(d(1.0), Union{Real,AbstractArray})
-d(1im)
-
-
-pyb = [[-0.12918431, -0.08592282, -0.01160232, -0.01214666, -0.08724766,
-        -0.11041723]'
-       [-0.04336452, -0.18968054, -0.03936773, -0.04067121, -0.15747941,
-        -0.04043451]'
-       [-0.01253993, -0.08570597, -0.12115969, -0.10612747, -0.08596611,
-        -0.01181959]'
-       [-0.01224558, -0.08278587, -0.09825402, -0.12805344, -0.08829647,
-        -0.01167793]'
-       [-0.04176031, -0.15390926, -0.03981166, -0.04296369, -0.19262705,
-        -0.0398543 ]'
-       [-0.11711359, -0.08451087, -0.01161941, -0.01230809, -0.08790605,
-        -0.12320301]']
-
-pyab= [[ 0.49636123,  0.07790867, -0.00064998,  0.03010003, -0.03187707,
-0.42815713]'
-[ 0.05128607,  0.49433738, -0.00969119,  0.07368283,  0.40229996,
--0.01191504]'
-[ 0.02740568, -0.01493923,  0.49244715,  0.38111021,  0.12572352,
--0.01174733]'
-[ 0.03077661,  0.03498736,  0.36467136,  0.49303843,  0.09204111,
--0.01551487]'
-[ 0.070334  ,  0.39765196,  0.01601686,  0.05811947,  0.49448535,
--0.03660764]'
-[ 0.43722782,  0.09755745,  0.00140479,  0.02835976, -0.0606458 ,
-0.49609598]']
-
-xp1 = [[ 0.13647793, -0.11141116, -0.62563229,  0.78401629,  0.64369451,
-         0.12106975]'
-       [ 0.4799133 ,  0.25464886, -0.25276978,  0.43889675,  0.28756136,
-        -0.24658627]'
-       [ 0.80263079,  0.63363943,  0.12516106,  0.1138805 , -0.08727244,
-        -0.60590605]'
-       [ 0.78014739,  0.64286326,  0.12687609,  0.1357953 , -0.10204789,
-        -0.59495831]'
-       [ 0.44907055,  0.2723636 , -0.24643286,  0.46885597,  0.26148335,
-        -0.23356923]'
-       [ 0.12430276, -0.10693808, -0.62511431,  0.79589423,  0.63629219,
-         0.12720445]']
-xp2 = [[-0.13647793, -0.62070888, -0.87595441,  0.51242569,  0.1207278 ,
--0.13333915]'
-[ 0.20695744, -0.25464886, -0.50309189,  0.16730615, -0.23540534,
--0.50099517]'
-[ 0.52967492,  0.12434171, -0.12516106, -0.1577101 , -0.61023915,
--0.86031495]'
-[ 0.50719153,  0.13356554, -0.12344603, -0.1357953 , -0.6250146 ,
--0.84936721]'
-[ 0.17611468, -0.23693412, -0.49675497,  0.19726537, -0.26148335,
--0.48797813]'
-[-0.1486531 , -0.6162358 , -0.87543643,  0.52430363,  0.11332548,
--0.12720445]']
-zp = [[-0.00156022, -0.07884296,  0.00894222, -0.39076149,  0.03052891,
--0.02914329]'
-[-0.14844254, -0.00453059,  0.03120909, -0.24788124, -0.08212744,
- 0.03682124]'
-[-0.34807564,  0.01460318, -0.00297037, -0.05201293, -0.14128461,
- 0.15884273]'
-[-0.39686014, -0.03831517, -0.05665919, -0.00297037, -0.08964048,
- 0.21143149]'
-[-0.22427167, -0.08445256, -0.05040694, -0.17169871, -0.00453059,
- 0.11764134]'
-[-0.02705974, -0.10674371, -0.01931007, -0.36512217,  0.05779915,
--0.00156022]']
-
-
-plot(foil.foil[1,:],foil.foil[2,:],aspect_ratio=:equal,ylim=(-0.25,0.25))
-plot!(md[1,:],md[2,:],st=:scatter)
-plot!(col[1,:],col[2,:],st=:scatter)
-quiver!(foil.col[1,:],foil.col[2,:], quiver=(-foil.normals[1,:],-foil.normals[2,:]))
+begin
+    foil, flow = init_params(; N=50, T=Float64, motion=:make_heave_pitch,
+                             f=0.25, motion_parameters=[-0.1, π / 20])
+    aoa = rotation(0 * pi / 180)'
+    foil._foil = (foil._foil' * aoa')'
+    wake = Wake(foil)
+    (foil)(flow)
+    movie = @animate for i = 1:flow.N*5
+        time_increment!(flow, foil, wake)
+        plot_current(foil, wake)
+        ## Get pressure on foil or other metrics
+    end
+    gif(movie, "images/no_time_step.gif", fps=60)
+end
