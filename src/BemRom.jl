@@ -1,4 +1,4 @@
-module BemRom
+# module BemRom
 # __precompile__(false)
 """ EXPORT EVERYTHING FOR THE LAZY"""
 
@@ -27,6 +27,7 @@ mutable struct FlowParams{T}
     Uinf::T
     ρ::T #fluid density
     N::Int #number of time steps
+    Ncycles::Int #number of cycles
     n::Int #current time step
     δ::T #desing radius
 end
@@ -142,31 +143,46 @@ doublet_inf(x1, x2, z) = -(atan(z, x2) - atan(z, x1)) / (2π)
 
 TODO Add wake stuff
 """
-function init_params(; N=128, chord=1.0, T=Float32, motion=:make_ang, f=1, k=1, motion_parameters=nothing)
-    N = N
-    chord = T(chord)
-    naca0012 = make_naca(N + 1; chord=chord) .|> T
-    if isnothing(motion_parameters)
-        kine = eval(motion)()
-    else
-        kine = eval(motion)(motion_parameters...)
-    end
-    Uinf = 1
-    ρ = 1000.0
-    Nt = 150
-    Δt = 1 / Nt / f
-    nt = 0
-    δ = Uinf * Δt * 1.3
-    fp = FlowParams{T}(Δt, Uinf, ρ, Nt, nt, δ)
-    txty, nxny, ll = norms(naca0012)
-    #TODO: 0.001 is a magic number for now
-    col = (get_mdpts(naca0012) .+ repeat(0.001 .* ll, 2, 1) .* -nxny) .|> T
+function init_params(; kwargs...)
+	T = kwargs[:T]
+    N = kwargs[:N]
+	chord = T(kwargs[:chord])
+	naca0012 = make_naca(N + 1; chord = chord) .|> T
+	if haskey(kwargs,:motion_parameters)
+		kine = eval(kwargs[:kine])(kwargs[:motion_parameters]...)
+	else
+		kine = eval(kwargs[:kine])()
+	end
+	Uinf = kwargs[:Uinf]
+	ρ = kwargs[:ρ]
+	Nt = kwargs[:Nt]
+    f = kwargs[:f]
+	Δt = 1 / Nt / f
+	nt = 0
+	δ = Uinf * Δt * 1.3
+    # totalTime = kwargs[:Ncyc]*Nt
+	fp = FlowParams{T}(Δt, Uinf, ρ, kwargs[:Ncyc], Nt, nt, δ)
+	txty, nxny, ll = norms(naca0012)
+	#TODO: 0.001 is a magic number for now
+	col = (get_mdpts(naca0012) .+ repeat(0.001 .* ll, 2, 1) .* -nxny) .|> T
 
-    edge_vec = fp.Uinf * fp.Δt * [(txty[1, end] - txty[1, 1]), (txty[2, end] - txty[2, 1])] .|> T
-    edge = [naca0012[:, end] (naca0012[:, end] .+ 0.5 * edge_vec) (naca0012[:, end] .+ 1.5 * edge_vec)]
-    #   kine, f, k, N, _foil,    foil ,    col,             σs, μs,         edge, chord, normals, tangents, panel_lengths,panbel_vel
-    Foil{T}(kine, T(f), T(k), N, naca0012, copy(naca0012), col, zeros(T, N), zeros(T, N), edge, zeros(T, 2), 1, nxny, txty, ll[:], zeros(size(nxny))), fp
+	edge_vec = Uinf * Δt * [(txty[1, end] - txty[1, 1]), (txty[2, end] - txty[2, 1])] .|> T
+	edge = [naca0012[:, end] (naca0012[:, end] .+ 0.5 * edge_vec) (naca0012[:, end] .+ 1.5 * edge_vec)]
+	#   kine, f, k, N, _foil,    foil ,    col,             σs, μs,         edge, chord, normals, tangents, panel_lengths,panbel_vel
+	Foil{T}(kine, T(f), T(kwargs[:k]), N, naca0012, copy(naca0012), col, zeros(T, N), zeros(T, N), edge, zeros(T, 2), 1, nxny, txty, ll[:], zeros(size(nxny))), fp
 end
+
+
+defaultDict = Dict(:T     => Float64,
+	:N     => 64,
+	:kine  => :make_ang,
+	:f     => 1,
+	:k     => 1,
+	:chord => 1.0,
+	:Nt    => 150,
+    :Ncyc  => 1,
+	:Uinf  => 1.0,
+	:ρ     => 1000.0)
 
 get_mdpts(foil) = (foil[:, 2:end] + foil[:, 1:end-1]) ./ 2
 
@@ -508,14 +524,17 @@ end
 
 TBW
 """
-function run_sim(; steps=flow.N * 4, aoa=rotation(0)', motion=:no_motion,
-    motion_parameters=nothing, nfoil=128, f=1)
+function run_sim(; kwargs...)
     # Initialize the foil and flow parameters
-    foil, flow = init_params(; N=nfoil, T=Float64, motion=motion, f=f, motion_parameters=motion_parameters)
+    foil, flow = init_params(; kwargs...)
+    steps = flow.N * flow.Ncycles
     # flow.δ /= 4
     den = 1 / 2 * (flow.Uinf^2 * foil.chord) # we avoid \rho unless needed
     # Rotate the foil based on the angle of attack (aoa)
-    foil._foil = (foil._foil' * aoa)'
+    if haskey(kwargs, :aoa)
+        foil._foil = (foil._foil' * kwargs[:aoa])'    
+    end
+    
     # Create a wake object for the foil
     wake = Wake(foil)
     # Initialize the previous time step's vorticity values
@@ -537,7 +556,7 @@ function run_sim(; steps=flow.N * 4, aoa=rotation(0)', motion=:no_motion,
         body_to_wake!(wake, foil, flow)
         wake_self_vel!(wake, flow)
         p, old_mus, old_phis = panel_pressure(foil, flow, wake_ind, old_mus, old_phis)
-        coeffs[:,i] = get_performance(foil, flow, p)
+        coeffs[:,i] .= get_performance(foil, flow, p)
              
         move_wake!(wake, flow)
         release_vortex!(wake, foil)
@@ -613,4 +632,4 @@ function time_increment!(flow::FlowParams, foil::Foil, wake::Wake)
     nothing
 end
 
-end
+# end
