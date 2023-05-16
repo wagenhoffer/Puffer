@@ -50,7 +50,7 @@ end
 
 begin
     foil, flow = init_params(; N=50, T=Float64, motion=:make_heave_pitch,
-                             f=0.25, motion_parameters=[-0.1, π / 20])
+                             f=0.75, motion_parameters=[-0.1, π / 20])
     aoa = rotation(0 * pi / 180)'
     foil._foil = (foil._foil' * aoa')'
     wake = Wake(foil)

@@ -134,8 +134,7 @@ function norms!(foil::Foil)
 end
 
 source_inf(x1, x2, z) = (x1 * log(x1^2 + z^2) - x2 * log(x2^2 + z^2) - 2 * (x1 - x2)
-                         +
-                         2 * z * (atan(z, x2) - atan(z, x1))) / (4π)
+                         + 2 * z * (atan(z, x2) - atan(z, x1))) / (4π)
 doublet_inf(x1, x2, z) = -(atan(z, x2) - atan(z, x1)) / (2π)
 
 """
@@ -160,9 +159,9 @@ function init_params(; kwargs...)
 	Δt = 1 / Nt / f
 	nt = 0
 	δ = Uinf * Δt * 1.3
-    # totalTime = kwargs[:Ncyc]*Nt
-	fp = FlowParams{T}(Δt, Uinf, ρ, kwargs[:Ncyc], Nt, nt, δ)
-	txty, nxny, ll = norms(naca0012)
+	fp = FlowParams{T}(Δt, Uinf, ρ, Nt, kwargs[:Ncyc], nt, δ)
+	
+    txty, nxny, ll = norms(naca0012)
 	#TODO: 0.001 is a magic number for now
 	col = (get_mdpts(naca0012) .+ repeat(0.001 .* ll, 2, 1) .* -nxny) .|> T
 
@@ -189,9 +188,11 @@ get_mdpts(foil) = (foil[:, 2:end] + foil[:, 1:end-1]) ./ 2
 function move_edge!(foil::Foil, flow::FlowParams)
     edge_vec = [(foil.tangents[1, end] - foil.tangents[1, 1]), (foil.tangents[2, end] - foil.tangents[2, 1])]
     edge_vec ./= norm(edge_vec)
-    edge_vec = flow.Uinf * flow.Δt * edge_vec
+    edge_vec .*= flow.Uinf * flow.Δt 
     #The edge starts at the TE -> advects some scale down -> the last midpoint
-    foil.edge = [foil.foil[:, end] (foil.foil[:, end] .+ 0.5 * edge_vec) foil.edge[:, 2]]
+    foil.edge = [foil.foil[:, end] (foil.foil[:, end] .+ 0.4 * edge_vec) foil.edge[:, 2]]
+    #static buffer is a bugger
+    # foil.edge = [foil.foil[:, end] (foil.foil[:, end] .+ 0.4 * edge_vec) (foil.foil[:, end] .+ 1.4 * edge_vec)]
     nothing
 end
 
@@ -211,8 +212,7 @@ function (foil::Foil)(flow::FlowParams)
     #perform kinematics
     if typeof(foil.kine) == Vector{Function}
         h = foil.kine[1](foil.f, flow.n * flow.Δt)
-        θ = foil.kine[2](foil.f, flow.n * flow.Δt, -π / 2)
-        # foil.foil = (foil._foil'*rotation(θ))'
+        θ = foil.kine[2](foil.f, flow.n * flow.Δt, -π/2)
         rotate_about!(foil, θ)
         foil.foil[2, :] .+= h
         #Advance the foil in flow
@@ -272,7 +272,7 @@ function get_panel_vels!(foil::Foil, fp::FlowParams)
     col = get_mdpts(foil._foil)
     #TODO switch to a s-exp label dispatch
     if typeof(foil.kine) == Vector{Function}
-        theta(t) = foil.kine[2](foil.f, t, -π / 2)
+        theta(t) = foil.kine[2](foil.f, t, -π/2)
         heave(t) = foil.kine[1](foil.f, t)
         dx(t) = col[1, :] * cos(theta(t)) - col[2, :] * sin(theta(t))
         dy(t) = col[1, :] * sin(theta(t)) + col[2, :] * cos(theta(t)) .+ heave(t)
@@ -475,18 +475,14 @@ function get_qt(foil::Foil)
     qt
 end
 
-function get_phi(foil::Foil, ind_flow)
-    acc_lens = 0.5 * foil.panel_lengths[1:end-1] + 0.5 * foil.panel_lengths[2:end]
-    acc_lens = [0; cumsum(acc_lens)]
-
-    # B = BSplineBasis(BSplineOrder(4), acc_lens[:])
-    S = interpolate(acc_lens, ind_flow, BSplineOrder(3))
-    dphi = Derivative(1) * S
-    dphidl = -dmu.(acc_lens)
-
-    #TODO: SPLIT σ into local and inducec? it is lumped into one now
-    qt = repeat(dphidl, 2, 1) .* foil.tangents #+ repeat(foil.σs',2,1).*foil.normals
-    qt
+function get_phi(foil::Foil, wake::Wake)
+    phi = zeros(foil.N)           
+    for i = 1:size(wake.Γ)[1]
+        dx = foil.col[1, :] .- wake.xy[1, i]
+        dy = foil.col[2, :] .- wake.xy[2, i]
+        @. phi = -wake.Γ[i] *atan(dy,dx)/(2π)        
+    end
+    phi
 end
 
 
@@ -505,10 +501,10 @@ function get_dmudt!(old_mus, foil::Foil, flow::FlowParams)
     dmudt, old_mus
 end
 
-function get_dphidt!(oldphi, ind_flow, flow::FlowParams)
-    dmudt = (3 * ind_flow - 4 * oldphi[1, :] + oldphi[2, :]) / (2 * flow.Δt)
+function get_dphidt!(oldphi, phi, flow::FlowParams)
+    dmudt = (3 * phi - 4 * oldphi[1, :] + oldphi[2, :]) / (2 * flow.Δt)
     oldphi = circshift(oldphi, (1, 0))
-    oldphi[1, :] = ind_flow
+    oldphi[1, :] = phi
     dmudt, oldphi
 end
 
@@ -532,7 +528,8 @@ function run_sim(; kwargs...)
     den = 1 / 2 * (flow.Uinf^2 * foil.chord) # we avoid \rho unless needed
     # Rotate the foil based on the angle of attack (aoa)
     if haskey(kwargs, :aoa)
-        foil._foil = (foil._foil' * kwargs[:aoa])'    
+        foil._foil = (foil._foil' * rotation(kwargs[:aoa])')'            
+        @show den
     end
     
     # Create a wake object for the foil
@@ -555,7 +552,8 @@ function run_sim(; kwargs...)
         cancel_buffer_Γ!(wake, foil)
         body_to_wake!(wake, foil, flow)
         wake_self_vel!(wake, flow)
-        p, old_mus, old_phis = panel_pressure(foil, flow, wake_ind, old_mus, old_phis)
+        phi =  get_phi(foil, wake)
+        p, old_mus, old_phis = panel_pressure(foil, flow, wake_ind, old_mus, old_phis, phi)
         coeffs[:,i] .= get_performance(foil, flow, p)
              
         move_wake!(wake, flow)
@@ -580,11 +578,12 @@ function get_performance(foil, flow, p)
     power / flow.Uinf]      #C_power    
 end
 
-function panel_pressure(foil::Foil, flow, wake_ind, old_mus, old_phis)
+function panel_pressure(foil::Foil, flow, wake_ind, old_mus, old_phis, phi)
     # wake_ind += edge_to_body(foil, flow)
     normal_wake_ind = sum(wake_ind .* foil.normals, dims=1)'
+
     dmudt, old_mus = get_dmudt!(old_mus, foil, flow)
-    dphidt, old_phis = get_dphidt!(old_phis, normal_wake_ind, flow)
+    dphidt, old_phis = get_dphidt!(old_phis, phi, flow)
 
     qt = get_qt(foil)
     qt .+= repeat((foil.σs)', 2, 1) .* foil.normals .+ normal_wake_ind'
@@ -629,7 +628,7 @@ function time_increment!(flow::FlowParams, foil::Foil, wake::Wake)
     body_to_wake!(wake, foil, flow)
     wake_self_vel!(wake, flow)
     
-    nothing
+    wake_ind
 end
 
 # end
