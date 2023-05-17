@@ -36,7 +36,7 @@ mutable struct Foil{T} <: Body
     f::T #wave freq
     k::T # wave number
     N::Int # number of elements
-    _foil::Matrix{T} #coordinates in the Body Frame
+    _foil::Matrix{T} # coordinates in the Body Frame
     foil::Matrix{T}  # Absolute fram
     col::Matrix{T}  # collocation points
     σs::Vector{T} #source strengths on the body 
@@ -159,7 +159,7 @@ function init_params(; kwargs...)
 	Δt = 1 / Nt / f
 	nt = 0
 	δ = Uinf * Δt * 1.3
-	fp = FlowParams{T}(Δt, Uinf, ρ, Nt, kwargs[:Ncyc], nt, δ)
+	fp = FlowParams{T}(Δt, Uinf, ρ, Nt, kwargs[:Ncycles], nt, δ)
 	
     txty, nxny, ll = norms(naca0012)
 	#TODO: 0.001 is a magic number for now
@@ -179,7 +179,7 @@ defaultDict = Dict(:T     => Float64,
 	:k     => 1,
 	:chord => 1.0,
 	:Nt    => 150,
-    :Ncyc  => 1,
+    :Ncycles  => 1,
 	:Uinf  => 1.0,
 	:ρ     => 1000.0)
 
@@ -196,12 +196,12 @@ function move_edge!(foil::Foil, flow::FlowParams)
     nothing
 end
 
-function set_collocation!(foil::Foil, S=0.009)
+function set_collocation!(foil::Foil, S=0.01)
     foil.col = (get_mdpts(foil.foil) .+ repeat(S .* foil.panel_lengths', 2, 1) .* -foil.normals)
 end
 
 rotation(α) = [cos(α) -sin(α)
-    sin(α) cos(α)]
+               sin(α) cos(α)]
 
 """
     (foil::Foil)(fp::FlowParams)
@@ -287,7 +287,7 @@ function get_panel_vels!(foil::Foil, fp::FlowParams)
     nothing
 end
 
-"""
+""" flow.n += 1
     panel_frame(target,source)
 
 TBW
@@ -547,7 +547,7 @@ function run_sim(; kwargs...)
         normal_wake_ind = sum(wake_ind .* foil.normals, dims=1)'
         foil.σs -= normal_wake_ind[:]
         buff = edge_body * foil.μ_edge[1]
-        foil.μs = A \ (-rhs*foil.σs-buff)[:]
+        foil.μs = A \ (-rhs*foil.σs - buff)[:]
         set_edge_strength!(foil)
         cancel_buffer_Γ!(wake, foil)
         body_to_wake!(wake, foil, flow)
@@ -567,10 +567,10 @@ end
 function get_performance(foil, flow, p)
     dforce = repeat(-p .* foil.panel_lengths', 2, 1) .* foil.normals
     dpress = sum(dforce .* foil.panel_vel, dims=2)
-    force = sum(dforce, dims=2)
-    lift = -force[2]
+    force  = sum(dforce, dims=2)
+    lift   = -force[2]
     thrust = force[1]
-    power = sum(dpress, dims=1)[1]
+    power  = sum(dpress, dims=1)[1]
 
     [sum(sqrt.(force .^ 2)), #C_forces
     lift,    #C_lift
@@ -615,9 +615,9 @@ function time_increment!(flow::FlowParams, foil::Foil, wake::Wake)
         release_vortex!(wake, foil)
     end    
     (foil)(flow)
+    
     A, rhs, edge_body = make_infs(foil)
-    setσ!(foil, flow)
-    cancel_buffer_Γ!(wake, foil)
+    setσ!(foil, flow)    
     wake_ind = vortex_to_target(wake.xy, foil.col, wake.Γ, flow)
     normal_wake_ind = sum(wake_ind .* foil.normals, dims=1)'
     foil.σs -= normal_wake_ind[:]
@@ -626,8 +626,7 @@ function time_increment!(flow::FlowParams, foil::Foil, wake::Wake)
     set_edge_strength!(foil)
     cancel_buffer_Γ!(wake, foil)
     body_to_wake!(wake, foil, flow)
-    wake_self_vel!(wake, flow)
-    
+    wake_self_vel!(wake, flow)    
     wake_ind
 end
 
