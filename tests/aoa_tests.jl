@@ -55,8 +55,8 @@ end
 begin
 	#look at the coefficicent of pressure for a single angle of attack
 	aoaComp = deepcopy(defaultDict)
-	aoaComp[:f] = 0.1
-	aoaComp[:Uinf] = 10.0
+	aoaComp[:f] = 1.
+	aoaComp[:Uinf] = 200.0
 	aoaComp[:kine] = :no_motion
 	aoaComp[:Ncycles] = 1
 	aoaComp[:aoa] = -(2.5* pi / 180)
@@ -77,7 +77,12 @@ begin
     
 		push!(cps, p)
 	end
-	plot(foil.col[1,:], cps[end]'./(0.5*flow.Uinf^2),marker=:circle, label="BEM")
+	mid = foil.N ÷2 +1
+
+	plot(foil.col[1,1:mid], cps[end][1:mid]./(0.5*flow.Uinf^2),marker=:circle, label="Bottom")
+	plot!(foil.col[1,mid:end], cps[end][mid:end]./(0.5*flow.Uinf^2),marker=:circle, label="Top")
+	plot!(xlabel="x/c", ylabel="C_p", legend=:bottomright, title!("C_p vs x/c for f = $(aoaComp[:f])"))
 end
 
-plot_current(foil, wake)
+
+
