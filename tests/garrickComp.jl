@@ -6,12 +6,12 @@ using Plots
 begin
 	garrick = deepcopy(defaultDict)
 	garrick[:Nt] = 150
-	garrick[:Ncyc] = 5
-	garrick[:f] = 0.5
-    garrick[:Uinf] = 0.85
+	garrick[:Ncycle] = 5
+	garrick[:f] = 0.25
+    garrick[:Uinf] = 2.0
 	garrick[:kine] = :make_heave_pitch
-	θ0 = deg2rad(1)
-	h0 = 0.10
+	θ0 = deg2rad(5)
+	h0 = 0.0
 	garrick[:motion_parameters] = [h0, θ0]
 
 
@@ -19,7 +19,7 @@ begin
 end
 
 begin
-	RHO = flow.ρ = 1.0
+	RHO = RHO = 1.0
 	b = foil.chord / 2.0
 	
 	t = flow.Δt:flow.Δt:flow.N*flow.Ncycles*flow.Δt
@@ -27,7 +27,7 @@ begin
 	
 	ω = 2π * foil.f
 	k = ω * b / flow.Uinf
-    ϕ = -pi/2*(flow.Uinf/foil.f)
+    ϕ = pi/2*(flow.Uinf/foil.f)
 	ϕ = -pi/2
 	ϕ = 0.0
 	@show ϕ
@@ -38,8 +38,8 @@ begin
 	R = π * θ0 * (k^2 / 2 * (0.125 + a^2) + (0.5 + a) * (F - (0.5 - a) * k * G))
 	I = -π * θ0 * (k / 2 * (0.5 - a) - (0.5 + a) * (G + (0.5 - a) * k * F))
 	Φ = atan(I, R)
-	gar = sqrt.(R .^ 2 + I .^ 2) # *  0.5* flow.ρ* flow.Uinf^2* foil.chord* 
-	Cl = gar .* exp.(-1im * ω * t)
+	gar = sqrt.(R .^ 2 + I .^ 2) # *  0.5* RHO* flow.Uinf^2* foil.chord* 
+	Cl = gar .* exp.(1im * ω * t)
 	M = gar .* exp.(1im * ω * t .+ Φ)
 	den = foil.chord^2 * foil.f^2 * (θ0 * foil.chord + h0)
 	
@@ -51,21 +51,49 @@ begin
 		2.0 * pi * RHO * flow.Uinf * b * G * (flow.Uinf * θ0 * cos(ω * t + ϕ) - h0 * ω * sin(ω * t) - b * (0.5 - a) * θ0 * ω * sin(ω * t + ϕ))
     @show k, ϕ , k/ϕ
 	
-	plot(t[1:end-24], coeffs[2, 25:end], marker = :circle, lw = 0, ms = 3, label = "BEM  \$C_L\$")
+	plot(t[25:end], coeffs[2, 25:end], marker = :circle, lw = 0, ms = 3, label = "BEM  \$C_L\$")
 	plot!(t, -inst_lift, label = "Garrick  \$C_L\$",lw=3)
 	# plot!(t, real(M), label="Garrick  \$C_M\$")
    
 end
-#Katz and Plotkin eqn 13.37a
-alpha = θ0*sin.(ω*t .+ π/2)
+
+#Katz and Plotkin eqn 13.73a
+phi = ϕ = π/2
+alpha = θ0*sin.(ω*t .+ phi)
 heave = h0*sin.(ω*t)
-alphadot = θ0*ω*cos.(ω*t .+ π/2)
-alphadotdot = -θ0*ω^2*sin.(ω*t .+ π/2)
+alphadot = θ0*ω*cos.(ω*t .+ phi)
+alphadotdot = -θ0*ω^2*sin.(ω*t .+ phi)
 hdot = h0*ω*cos.(ω*t)
 hdotdot = -h0*ω^2*sin.(ω*t)
 kk = ω*foil.chord/2/flow.Uinf
-lift = π*flow.ρ*flow.Uinf*foil.chord*theod(k)*(flow.Uinf*alpha - hdot + 0.75*foil.chord*alphadot) + 
-	   π*flow.ρ*foil.chord^2/4.0 *(flow.Uinf*alphadot - hdotdot + foil.chord/2.0*alphadotdot)
+lift = π*RHO*flow.Uinf*foil.chord*theod(k)*(flow.Uinf*alpha - hdot + 0.75*foil.chord*alphadot) + 
+	   π*RHO*foil.chord^2/4.0 *(flow.Uinf*alphadot - hdotdot + foil.chord/2.0*alphadotdot)
 
 plot(t, real(lift), label="Katz and Plotkin  \$C_L\$",lw=3)
 plot!(t[25:end], coeffs[2, 25:end], marker = :circle, lw = 0, ms = 3, label = "BEM  \$C_L\$")
+
+#Katz and Plotkin 13.74a
+M0 = - π*RHO*foil.chord^2/4*(-b*hdotdot+3*flow.Uinf*b/2*alphadot + 9/32*foil.chord^2*alphadotdot +flow.Uinf*theod(k)*(-hdot +flow.Uinf*alpha+3*b/2*alphadot))
+
+plot(real(M0.*alpha))
+# plot(t[25:end], coeffs[2, 25:end], marker = :circle, lw = 0, ms = 3, label = "BEM  \$C_L\$")
+km = foil.f*foil.chord/2/flow.Uinf
+td = theod(km)
+F,G = real(td), imag(td)
+C_t_Jones_and_Platzer_Pitch_Only = pi*k^2*θ0^2*((F^2 + G^2)*(1/k^2+(0.5-a)^2)+(0.5 - F)*(0.5-a)-F/k^2-(0.5+a)*G/k)
+Ct = 3*pi^3/32 - pi^3/8*(3*F/2 - G/(2*pi*km) + F /(pi*k)^2 - (F^2+G^2)*(1/(pi*km)^2 + 9/4))
+plot(Ct.*sin.(ω*t), label="C_t Garrick")
+plot!(coeffs[3,25:end]/(0.5*θ0^2*foil.f), label="C_t BEM")
+
+#RIPPING OFF MOORED
+m = exp.(1im*ω*t)
+test_thing = imag( ( ( 3. * pi ^3 * (1 - td)/ 4.) + 1im*(9. * pi ^4 *km/16. + pi^2*td/2.0/km)) * m)
+Power_star = imag(test_thing.*m)
+
+P_star = imag( ( ( pi^2/2. - td/km^2) - 1im*( pi/2.0/km + 3.0*pi*td/2.0/km ) )*pi*m )
+alpha_P_star = imag(P_star.*m)
+S_star = imag( sqrt(2.)/2.0*( 2.0*td/km + 1im*( 3.0*pi*td - pi ))*m )
+
+inst_C_T_moored = pi/2.0*S_star.^2 + alpha_P_star # use the imaginary part--associated with sin(omega*t) motion.
+plot(t[25:end], coeffs[3, 25:end]/foil.f^2/θ0^2, marker = :circle, lw = 0, ms = 3, label = "BEM  \$C_T\$")
+plot!(t, inst_C_T_moored, label="Garrick  \$C_T\$",lw=3)
