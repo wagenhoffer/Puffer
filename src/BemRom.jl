@@ -31,6 +31,7 @@ mutable struct FlowParams{T}
     n::Int #current time step
     δ::T #desing radius
 end
+
 mutable struct Foil{T} <: Body
     kine  #kinematics: heave or traveling wave function
     f::T #wave freq
@@ -196,7 +197,7 @@ function move_edge!(foil::Foil, flow::FlowParams)
     nothing
 end
 
-function set_collocation!(foil::Foil, S=0.01)
+function set_collocation!(foil::Foil, S=0.009)
     foil.col = (get_mdpts(foil.foil) .+ repeat(S .* foil.panel_lengths', 2, 1) .* -foil.normals)
 end
 
@@ -326,8 +327,8 @@ end
 
 function make_infs(foil::Foil; ϵ=1e-10)
     x1, x2, y = panel_frame(foil.col, foil.foil)
-    ymask = abs.(y) .> ϵ
-    y = y .* ymask
+    # ymask = abs.(y) .> ϵ
+    # y = y .* ymask
     doubletMat = doublet_inf.(x1, x2, y)
     sourceMat = source_inf.(x1, x2, y)
     x1, x2, y = panel_frame(foil.col, foil.edge)
@@ -480,7 +481,7 @@ function get_phi(foil::Foil, wake::Wake)
     for i = 1:size(wake.Γ)[1]
         dx = foil.col[1, :] .- wake.xy[1, i]
         dy = foil.col[2, :] .- wake.xy[2, i]
-        @. phi = -wake.Γ[i] *atan(dy,dx)/(2π)        
+        @. phi = -wake.Γ[i] *mod2pi(atan(dy,dx))/(2π)        
     end
     phi
 end
@@ -586,7 +587,7 @@ function panel_pressure(foil::Foil, flow, wake_ind, old_mus, old_phis, phi)
     dphidt, old_phis = get_dphidt!(old_phis, phi, flow)
 
     qt = get_qt(foil)
-    qt .+= repeat((foil.σs)', 2, 1) .* foil.normals .+ normal_wake_ind'
+    qt .+= repeat((foil.σs)', 2, 1) .* foil.normals #.+ normal_wake_ind'
     p_s = sum((qt + wake_ind) .^ 2, dims=1) / 2.0
     p_us = dmudt' + dphidt' - (qt[1, :]' .* (-flow.Uinf .+ foil.panel_vel[1, :]')
                                .+
