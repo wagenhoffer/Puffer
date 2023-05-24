@@ -49,6 +49,9 @@ mutable struct Foil{T} <: Body
     tangents::Matrix{T}
     panel_lengths::Vector{T}
     panel_vel::Matrix{T}
+    wake_ind_vel::Matrix{T} #velocity induced by wake at collocation points
+    ledge::Matrix{T} #leading edge panel 
+    μ_ledge::Vector{T} #leading edge doublet strength
 end
 
 mutable struct Wake{T}
@@ -163,13 +166,14 @@ function init_params(; kwargs...)
 	fp = FlowParams{T}(Δt, Uinf, ρ, Nt, kwargs[:Ncycles], nt, δ)
 	
     txty, nxny, ll = norms(naca0012)
-	#TODO: 0.001 is a magic number for now
+	
 	col = (get_mdpts(naca0012) .+ repeat(0.001 .* ll, 2, 1) .* -nxny) .|> T
 
 	edge_vec = Uinf * Δt * [(txty[1, end] - txty[1, 1]), (txty[2, end] - txty[2, 1])] .|> T
 	edge = [naca0012[:, end] (naca0012[:, end] .+ 0.5 * edge_vec) (naca0012[:, end] .+ 1.5 * edge_vec)]
-	#   kine, f, k, N, _foil,    foil ,    col,             σs, μs,         edge, chord, normals, tangents, panel_lengths,panbel_vel
-	Foil{T}(kine, T(f), T(kwargs[:k]), N, naca0012, copy(naca0012), col, zeros(T, N), zeros(T, N), edge, zeros(T, 2), 1, nxny, txty, ll[:], zeros(size(nxny))), fp
+	            #  kine, f,    k,             N,    _foil,    foil ,       col,          σs,          μs, edge,   μ_edge,chord,normals, tangents, panel_lengths, panbel_vel, wake_ind_vel, ledge, μ_ledge
+	foil = Foil{T}(kine, T(f), T(kwargs[:k]), N, naca0012, copy(naca0012), col, zeros(T, N), zeros(T, N), edge, zeros(T, 2), 1, nxny, txty, ll[:], zeros(size(nxny)),zeros(size(nxny)),zeros(T, 3,2),zeros(T,2))
+    foil, fp
 end
 
 
@@ -182,7 +186,8 @@ defaultDict = Dict(:T     => Float64,
 	:Nt    => 150,
     :Ncycles  => 1,
 	:Uinf  => 1.0,
-	:ρ     => 1000.0)
+	:ρ     => 1000.0, 
+    :Nfoils => 1)
 
 get_mdpts(foil) = (foil[:, 2:end] + foil[:, 1:end-1]) ./ 2
 
@@ -340,6 +345,40 @@ function make_infs(foil::Foil; ϵ=1e-10)
     doubletMat + edgeMat, sourceMat, edgeInf[:, 2]
 end
 
+function make_infs(foils::Vector{Foil{T}}; ϵ=1e-10) where T <: Real
+    nfoils = length(foils)
+    Ns = [foil.N for foil in foils]
+    N = sum(Ns)
+    Ns = [0 cumsum(Ns)...]
+    doubletMat = zeros(N, N)
+    sourceMat  = zeros(N, N)
+    edgeMat    = zeros(N, N)
+    #assumes all foils are same size
+    buffers    = zeros(nfoils, foils[1].N)
+    #for pushing
+    # buffers = []
+    for i = 1:nfoils
+        for j = 1:nfoils
+            x1, x2, y = panel_frame(foils[i].col, foils[j].foil)
+            # ymask = abs.(y) .> ϵ
+            # y = y .* ymask
+            doubletMat[Ns[i]+1:Ns[i+1],Ns[j]+1:Ns[j+1]] = doublet_inf.(x1, x2, y)
+            sourceMat[Ns[i]+1:Ns[i+1],Ns[j]+1:Ns[j+1]] = source_inf.(x1, x2, y)
+            if i == j 
+                nn = foils[i].N
+                x1, x2, y = panel_frame(foils[i].col, foils[i].edge)
+                edgeInf = doublet_inf.(x1, x2, y)
+                buffers[i,:] = edgeInf[:,2]
+                # push!(buffers, edgeInf[:, 2])
+                edgeMat[Ns[i]+1:Ns[i+1], Ns[i]+1] = -edgeInf[:, 1]
+                edgeMat[Ns[i]+1:Ns[i+1], Ns[i+1]] = edgeInf[:, 1]
+            end
+        end 
+    end                            
+    A = doubletMat + edgeMat
+    doubletMat + edgeMat, sourceMat, buffers'
+end
+
 """ 
     setσ!(foil::Foil, wake::Wake,flow::FlowParams)
 
@@ -366,7 +405,7 @@ function wake_self_vel!(wake::Wake, flow::FlowParams)
     wake.uv .+= vortex_to_target(wake.xy, wake.xy, wake.Γ, flow)
     nothing
 end
-
+::Foil
 """
     body_to_wake!(wake :: Wake, foil :: Foil)
 
@@ -415,6 +454,12 @@ function release_vortex!(wake::Wake, foil::Foil)
     wake.Γ = [wake.Γ..., (foil.μ_edge[1] - foil.μ_edge[2])]
     # Set all back to zero for the next time step
     wake.uv = [wake.uv .* 0.0 [0.0, 0.0]]
+
+    if any(foil.μ_ledge .!= 0)
+        wake.xy = [wake.xy foil.ledge[:,2]]
+        wake.Γ = [wake.Γ..., (foil.μ_ledge[1] - foil.μ_ledge[2])]
+        wake.uv = [wake.uv .* 0.0 [0.0, 0.0]]
+    end
     nothing
 end
 
@@ -426,11 +471,24 @@ function set_edge_strength!(foil::Foil)
     foil.μ_edge[1] = foil.μs[end] - foil.μs[1]
     nothing
 end
-
+function set_ledge_strength!(foil::Foil)
+    """Assumes that foil.μs has been set for the current time step 
+        TODO: Extend to perform streamline based Kutta condition
+    """
+    mid = foil.N ÷ 2
+    foil.μ_ledge[2] = foil.μ_ledge[1]
+    foil.μ_ledge[1] = foil.μs[mid] - foil.μs[mid+1]
+    nothing
+end
 function cancel_buffer_Γ!(wake::Wake, foil::Foil)
     #TODO : Add iterator for matching 1->i for nth foil
     wake.xy[:, 1] = foil.edge[:, end]
     wake.Γ[1] = -foil.μ_edge[end]
+    #LESP
+    if foil.μ_ledge[2] != 0
+        wake.xy[:, 2] = foil.ledge[:, end]
+        wake.Γ[2] = -foil.μ_ledge[end]
+    end
     nothing
 end
 
@@ -440,7 +498,7 @@ function plot_current(foil::Foil, wake::Wake; window=nothing)
     else
         xs = :auto
     end
-    max_val = maximum(abs, wake.Γ)
+    max_val = maximum(abs, wake.Γ)A = A + le_inf
     max_val = std(wake.Γ) / 2.0
 
     a = plot(foil.foil[1, :], foil.foil[2, :], aspect_ratio=:equal, label="")
@@ -530,13 +588,12 @@ function run_sim(; kwargs...)
     # Rotate the foil based on the angle of attack (aoa)
     if haskey(kwargs, :aoa)
         foil._foil = (foil._foil' * rotation(kwargs[:aoa])')'            
-        @show den
     end
     
     # Create a wake object for the foil
     wake = Wake(foil)
     # Initialize the previous time step's vorticity values
-    old_mus = zeros(3, foil.N)
+    old_mus = zeros(3, foil.N)::Foil
     old_phis = zeros(3, foil.N)
     #coefficients of force, lift, thrust, power
     coeffs = zeros(4, steps)
@@ -544,8 +601,8 @@ function run_sim(; kwargs...)
     for i = 1:steps
         A, rhs, edge_body = make_infs(foil)
         setσ!(foil, flow)
-        wake_ind = vortex_to_target(wake.xy, foil.col, wake.Γ, flow)
-        normal_wake_ind = sum(wake_ind .* foil.normals, dims=1)'
+        foil.wake_ind_vel = vortex_to_target(wake.xy, foil.col, wake.Γ, flow)
+        normal_wake_ind = sum(foil.wake_ind_vel .* foil.normals, dims=1)'
         foil.σs -= normal_wake_ind[:]
         buff = edge_body * foil.μ_edge[1]
         foil.μs = A \ (-rhs*foil.σs - buff)[:]
@@ -554,7 +611,7 @@ function run_sim(; kwargs...)
         body_to_wake!(wake, foil, flow)
         wake_self_vel!(wake, flow)
         phi =  get_phi(foil, wake)
-        p, old_mus, old_phis = panel_pressure(foil, flow, wake_ind, old_mus, old_phis, phi)
+        p, old_mus, old_phis = panel_pressure(foil, flow, old_mus, old_phis, phi)
         coeffs[:,i] .= get_performance(foil, flow, p)
              
         move_wake!(wake, flow)
@@ -564,6 +621,7 @@ function run_sim(; kwargs...)
     end
     foil, flow,  wake, coeffs 
 end
+
 
 function get_performance(foil, flow, p)
     dforce = repeat(-p .* foil.panel_lengths', 2, 1) .* foil.normals
@@ -579,16 +637,16 @@ function get_performance(foil, flow, p)
     power / flow.Uinf]      #C_power    
 end
 
-function panel_pressure(foil::Foil, flow, wake_ind, old_mus, old_phis, phi)
+function panel_pressure(foil::Foil, flow,  old_mus, old_phis, phi)
     # wake_ind += edge_to_body(foil, flow)
-    normal_wake_ind = sum(wake_ind .* foil.normals, dims=1)'
+    normal_wake_ind = sum(foil.wake_ind_vel .* foil.normals, dims=1)'
 
     dmudt, old_mus = get_dmudt!(old_mus, foil, flow)
     dphidt, old_phis = get_dphidt!(old_phis, phi, flow)
 
     qt = get_qt(foil)
-    qt .+= repeat((foil.σs)', 2, 1) .* foil.normals #.+ normal_wake_ind'
-    p_s = sum((qt + wake_ind) .^ 2, dims=1) / 2.0
+    qt .+= repeat((foil.σs)', 2, 1) .* foil.normals 
+    p_s = sum((qt + foil.wake_ind_vel) .^ 2, dims=1) / 2.0
     p_us = dmudt' + dphidt' - (qt[1, :]' .* (-flow.Uinf .+ foil.panel_vel[1, :]')
                                .+
                                qt[2, :]' .* (foil.panel_vel[2, :]'))
@@ -619,8 +677,8 @@ function time_increment!(flow::FlowParams, foil::Foil, wake::Wake)
     
     A, rhs, edge_body = make_infs(foil)
     setσ!(foil, flow)    
-    wake_ind = vortex_to_target(wake.xy, foil.col, wake.Γ, flow)
-    normal_wake_ind = sum(wake_ind .* foil.normals, dims=1)'
+    foil.wake_ind_vel = vortex_to_target(wake.xy, foil.col, wake.Γ, flow)
+    normal_wake_ind = sum(foil.wake_ind_vel .* foil.normals, dims=1)'
     foil.σs -= normal_wake_ind[:]
     buff = edge_body * foil.μ_edge[1]
     foil.μs = A \ (-rhs*foil.σs-buff)[:]
@@ -628,7 +686,36 @@ function time_increment!(flow::FlowParams, foil::Foil, wake::Wake)
     cancel_buffer_Γ!(wake, foil)
     body_to_wake!(wake, foil, flow)
     wake_self_vel!(wake, flow)    
-    wake_ind
+    nothing
 end
 
 # end
+
+
+# #### TODO LIST WHAT NEEDS TO BE VEC'D FOR MULTI and what can LOOP
+# A, rhs, edge_body = make_infs(foils) #̌#CHECK
+# [setσ!(foil, flow) for foil in foils] #CHECK
+# σs = [] #CHECK
+# buff = []
+# for (i, foil) in enumerate(foils)
+#     foil.wake_ind_vel = vortex_to_target(wake.xy, foil.col, wake.Γ, flow)
+#     normal_wake_ind = sum(foil.wake_ind_vel .* foil.normals, dims=1)'
+#     foil.σs -= normal_wake_ind[:]
+#     push!(σs, foil.σs...)
+#     push!(buff, (edge_body[:,i] * foil.μ_edge[1])...)    
+# end
+# μs =  A \ (-rhs*σs - buff)
+# for (i, foil) in enumerate(foils)
+#     foil.μs = μs[(i-1)*foil.N+1:i*foil.N]
+# end
+# set_edge_strength!.(foils)
+# cancel_buffer_Γ!(wake, foil)
+# body_to_wake!(wake, foil, flow)
+# wake_self_vel!(wake, flow)
+# phi =  get_phi(foil, wake)
+# p, old_mus, old_phis = panel_pressure(foil, flow, wake_ind, old_mus, old_phis, phi)
+# coeffs[:,i] .= get_performance(foil, flow, p)
+     
+# move_wake!(wake, flow)
+# release_vortex!(wake, foil)
+# (foil)(flow)
