@@ -108,6 +108,28 @@ function make_ang(a0=0.1; a=[0.367, 0.323, 0.310])
     h
 end
 
+function make_heave_pitch(h0, θ0; T=Float64)
+    θ(f, t, ψ) = θ0 * sin(2 * π * f * t + ψ)
+    h(f, t) = h0 * sin(2 * π * f * t)
+    [h, θ]
+end
+
+function make_eldredge(α, αdot;s = 0.001,chord=1.0, Uinf = 1.0)
+    K = αdot*chord/(2*Uinf)
+    a(σ) = π^2 *K /(2*α*(1.0 -σ))
+    
+    t1 = 1.0
+    t2 = t1 + α/2/K
+    t3 = t2 + π*α/4/K - α/2/K
+    t4 = t3 + α/2/K
+    eld(t) = log((cosh(a(s)*(t - t1))*cosh(a(s)*(t - t4)))/
+                 (cosh(a(s)*(t - t2))*cosh(a(s)*(t - t3))))
+    maxG = maximum(filter(x->!isnan(x), eld.(0:0.1:100)))
+    pitch(f,tt,p) = α*eld(tt)/maxG
+    heave(f,t) = 0.0
+    [heave, pitch]
+end
+
 function no_motion(; T=Float64)
     sig(x, f, k, t) = 0.0
 end
@@ -242,11 +264,7 @@ end
 
 
 
-function make_heave_pitch(h0, θ0; T=Float64)
-    θ(f, t, ψ) = θ0 * sin(2 * π * f * t + ψ)
-    h(f, t) = h0 * sin(2 * π * f * t)
-    [h, θ]
-end
+
 
 """
     get_panel_vels(foil::Foil,fp::FlowParams)
@@ -263,7 +281,6 @@ function get_panel_vels(foil::Foil, fp::FlowParams)
         heave(t) = foil.kine[2](foil.f, t)
         dx(t) = foil._foil[1, :] * cos(theta(t)) - foil._foil[2, :] * sin(theta(t))
         dy(t) = foil._foil[1, :] * sin(theta(t)) + foil._foil[2, :] * cos(theta(t)) .+ heave(t)
-        # [ForwardDiff.derivative(t->dx(t), _t),ForwardDiff.derivative(t->dy(t), _t)]
         vels = [ForwardDiff.derivative(t -> dx(t), _t), ForwardDiff.derivative(t -> dy(t), _t)]
     else
         vy = ForwardDiff.derivative(t -> foil.
@@ -405,7 +422,7 @@ function wake_self_vel!(wake::Wake, flow::FlowParams)
     wake.uv .+= vortex_to_target(wake.xy, wake.xy, wake.Γ, flow)
     nothing
 end
-::Foil
+
 """
     body_to_wake!(wake :: Wake, foil :: Foil)
 
@@ -498,7 +515,7 @@ function plot_current(foil::Foil, wake::Wake; window=nothing)
     else
         xs = :auto
     end
-    max_val = maximum(abs, wake.Γ)A = A + le_inf
+    max_val = maximum(abs, wake.Γ)
     max_val = std(wake.Γ) / 2.0
 
     a = plot(foil.foil[1, :], foil.foil[2, :], aspect_ratio=:equal, label="")

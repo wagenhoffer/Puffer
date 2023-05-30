@@ -6,17 +6,21 @@ using Plots
 fixedangle = deepcopy(defaultDict)
 fixedangle[:N] = 50
 fixedangle[:Nt] = 64
-fixedangle[:Ncycles] = 2
-fixedangle[:f] = 0.25
+fixedangle[:Ncycles] = 1
+fixedangle[:f] = 0.5
 fixedangle[:Uinf] = 1
+# fixedangle[:kine] = :make_eldredge
 fixedangle[:kine] = :make_heave_pitch
-θ0 = deg2rad(10)
+θ0 = deg2rad(0)
 h0 = 0.0
 fixedangle[:motion_parameters] = [h0, θ0]
-fixedangle[:aoa] = deg2rad(33)
+# fixedangle[:motion_parameters] = [θ0, 1000.]
+fixedangle[:aoa] = deg2rad(90)
 
 # delete!(fixedangle, :motion_parameters)
-
+global lesp = false
+global old_phis = zeros(3,fixedangle[:N] )
+global old_mus = zeros(3,fixedangle[:N] )  
 begin
     foil, flow = init_params(;fixedangle...)
     foil._foil = (foil._foil' * rotation(-fixedangle[:aoa])')'
@@ -25,57 +29,85 @@ begin
     #LESP
     set_ledge!(foil, flow)
     #data containers
-    old_mus, old_phis = zeros(3,foil.N), zeros(3,foil.N)   
+    global old_phis = zeros(3,foil.N)
+    global old_mus = zeros(3,foil.N)   
     phi = zeros(foil.N)
     coeffs = zeros(4,flow.Ncycles*flow.N)
     ps = zeros(foil.N ,flow.Ncycles*flow.N)
+    pus = zeros(foil.N ,flow.Ncycles*flow.N)
     ### EXAMPLE OF AN PERFROMANCE METRICS LOOP
-    movie = @animate for i in 1:flow.Ncycles*flow.N
-        A, rhs, edge_body = make_infs(foil)
-        #LESP
-        if i%1 == 0
-            le_inf, le_buff = ledge_inf(foil)
-            A = A + le_inf
-        end        
-        setσ!(foil, flow)    
-        foil.wake_ind_vel = vortex_to_target(wake.xy, foil.col, wake.Γ, flow)
+    animated = true
+    anim = Animation()    
+    # movie = @animate for i in 1:flow.Ncycles*flow.N
+    for i in 1:flow.Ncycles*flow.N
+
+        theLoop(false)
+        
+        phi =  get_phi(foil, wake)                                   
+        # p, old_mus, old_phis = panel_pressure(foil, flow,  old_mus, old_phis, phi)     
+            # wake_ind += edge_to_body(foil, flow)
         normal_wake_ind = sum(foil.wake_ind_vel .* foil.normals, dims=1)'
-        foil.σs -= normal_wake_ind[:]
-        buff = edge_body * foil.μ_edge[1]
-        #LESP
-        if i%1 == 0 
-            buff += le_buff * foil.μ_ledge[1]
-        end
-        foil.μs = A \ (-rhs*foil.σs-buff)[:]
-        set_edge_strength!(foil)
-        #LESP
-        if i%1 == 0  
-            set_ledge_strength!(foil)
+
+        dmudt, old_mus = get_dmudt!(old_mus, foil, flow)
+        dphidt, old_phis = get_dphidt!(old_phis, phi, flow)
+
+        qt = get_qt(foil)
+        qt .+= repeat((foil.σs)', 2, 1) .* foil.normals 
+        p_s = sum((qt + foil.wake_ind_vel) .^ 2, dims=1) / 2.0
+        p_us = dmudt' + dphidt' - (qt[1, :]' .* (-flow.Uinf .+ foil.panel_vel[1, :]')
+                                .+
+                                qt[2, :]' .* (foil.panel_vel[2, :]'))
+
+        # Calculate the total pressure coefficient
+        """
+        ∫∞→Px1 d(∇×Ψ)/dt dC + dΦ/dt|body - (VG + VGp + (Ωxr))⋅∇Φ + 1/2||∇Φ +(∇×Ψ)|^2  = Pinf - Px1 /ρ
+        """
+        p = p_s + p_us
+        if p[25] > - 10000.0
+            theLoop(true)  
+            set_ledge_strength!(foil)                        
         else
             foil.μ_ledge[2] = foil.μ_ledge[1]
             foil.μ_ledge[1] = 0.0
-        end
-        @show foil.μ_ledge
+        end  
+        # end    
+        coeffs[:,i] = get_performance(foil, flow, p)
+        ps[:,i] = p_s
+        pus[:,i] = p_us
+
+               
         cancel_buffer_Γ!(wake, foil)
         body_to_wake!(wake, foil, flow)
         wake_self_vel!(wake, flow)  
-        phi =  get_phi(foil, wake)                                   
-        # p, old_mus, old_phis = panel_pressure(foil, flow,  old_mus, old_phis, phi)        
-        # coeffs[:,i] = get_performance(foil, flow, p)
-        # ps[:,i] = p
-
         move_wake!(wake, flow)
         release_vortex!(wake, foil)
         (foil)(flow)
         #LEading edge is separate for now, rollin it into the main loop        
         #LESP
         set_ledge!(foil, flow)
-        f = plot_current(foil, wake)
-        f
+        if animated
+            f = plot_current(foil, wake)
+            frame(anim,f)
+        end
     end
-    gif(movie, "LESP_1.gif", fps=30)  
+    if animated
+        gif(anim, "LESP_1.gif", fps=30)  
+    end
 end
-
+begin
+    a1 = plot(pus, label="")
+    b2 = plot(ps, label="")
+    c3 = plot(ps.+pus, label="")
+    plot(a1,b2,c3, layout=(3,1))
+end
+begin
+    t = LinRange(0,flow.Ncycles/foil.f,flow.Ncycles*flow.N)
+    a1 = contour(t, 1:foil.N, (ps+pus), colors=:jet,label="")
+    angle = foil.kine[2].(0.0, t, 0.0)*180.0/pi
+    
+    b2 = plot(t, angle, size=(800,200), label="")
+    plot(a1,b2, layout=(2,1),size=(800,800))
+end
 
 foil, flow = init_params(;fixedangle...)
 wake = Wake(foil)
@@ -158,4 +190,31 @@ function ledge_inf(foil::Foil)
     edgeMat[:, mid] = edgeInf[:, 1]
     edgeMat[:, mid+1] = -edgeInf[:, 1]
     edgeMat, edgeInf[:,2]
+end
+
+
+function theLoop(lesp)
+    A, rhs, edge_body = make_infs(foil)
+    le_inf, le_buff = ledge_inf(foil)
+    #LESP
+    if lesp       
+        A = A + le_inf
+    end        
+    setσ!(foil, flow)    
+    #doesn't change
+    foil.wake_ind_vel = vortex_to_target(wake.xy, foil.col, wake.Γ, flow)
+    #doesn't change
+    normal_wake_ind = sum(foil.wake_ind_vel .* foil.normals, dims=1)'
+    # Repeated 
+    foil.σs -= normal_wake_ind[:]
+    buff = edge_body * foil.μ_edge[1]
+    buff += le_buff * foil.μ_ledge[1]
+    #now pseudo code, but if lesp, then add le_inf to A, else the simulation was fine
+    if !lesp
+        foil.μs = A \ (-rhs*foil.σs-buff)[:]
+    else
+        foil.μs = (A +le_inf)\ (-rhs*foil.σs-buff)[:]
+    set_edge_strength!(foil)
+
+    nothing
 end
