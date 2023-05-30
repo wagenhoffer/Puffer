@@ -6,10 +6,10 @@ using Plots
 heave_pitch = deepcopy(defaultDict)
 heave_pitch[:Nt] = 64
 heave_pitch[:Ncycles] = 4
-heave_pitch[:f] = 0.5
+heave_pitch[:f] = 0.25
 heave_pitch[:Uinf] = 1
 heave_pitch[:kine] = :make_heave_pitch
-θ0 = deg2rad(2.5)
+θ0 = deg2rad(30)
 h0 = 0.0
 heave_pitch[:motion_parameters] = [h0, θ0]
 
@@ -47,9 +47,9 @@ begin
     ps = zeros(foil.N ,flow.Ncycles*flow.N)
     ### EXAMPLE OF AN PERFROMANCE METRICS LOOP
     for i in 1:flow.Ncycles*flow.N
-        wake_ind = time_increment!(flow, foil, wake)
-        phi =  get_phi(foil, wake)        
-        p, old_mus, old_phis = panel_pressure(foil, flow, wake_ind, old_mus, old_phis, phi)        
+        time_increment!(flow, foil, wake)
+        phi =  get_phi(foil, wake)                                   
+        p, old_mus, old_phis = panel_pressure(foil, flow,  old_mus, old_phis, phi)        
         coeffs[:,i] = get_performance(foil, flow, p)
         ps[:,i] = p
     end
@@ -64,7 +64,7 @@ end
 
 begin
     # plot a few snap shot at opposite ends of the motion
-    pos = 180
+    pos = 15
     # plot(phis[pos ] .- maximum(phis[pos]), label="x-start")
     # plot!(phis[pos+flow.N÷2][end:-1:1] .- maximum(phis[pos+flow.N÷2]), label="x-half",marker=:circle,lw=0)
     xx = plot(phis[pos][1,:])
@@ -163,3 +163,6 @@ begin
     end
     gif(normals, "tangents.gif", fps=30)
 end
+
+
+p

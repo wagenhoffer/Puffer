@@ -54,35 +54,39 @@ end
 
 begin
 	#look at the coefficicent of pressure for a single angle of attack
-	aoaComp = deepcopy(defaultDict)
-	aoaComp[:f] = 0.1
-	aoaComp[:Uinf] = 20.0
-	aoaComp[:kine] = :no_motion
-	aoaComp[:Ncycles] = 1
-	aoaComp[:aoa] = -(5* pi / 180)
+	movie  = @animate for α = 1:8
+		aoaComp = deepcopy(defaultDict)
+		aoaComp[:f] = 0.1
+		aoaComp[:Uinf] = 20.0
+		aoaComp[:kine] = :no_motion
+		aoaComp[:Ncycles] = 1
+		aoaComp[:aoa] = -(α* pi / 180)
 
-    foil, flow = init_params(;aoaComp...)
-	foil._foil = (foil._foil' * rotation(aoaComp[:aoa])')'
-    wake = Wake(foil)
-    (foil)(flow)
-    #data containers
-    old_mus, old_phis = zeros(3,foil.N), zeros(3,foil.N)   
-    phi = zeros(foil.N)
-	cps = []
-    for i in 1:flow.Ncycles*flow.N
-        wake_ind = time_increment!(flow, foil, wake)
-        phi =  get_phi(foil, wake)
-        p, old_mus, old_phis = panel_pressure(foil, flow, wake_ind, old_mus, old_phis, phi)
-        # coeffs[:,i] .= get_performance(foil, flow, p)
-    
-		push!(cps, p)
+		foil, flow = init_params(;aoaComp...)
+		foil._foil = (foil._foil' * rotation(aoaComp[:aoa])')'
+		wake = Wake(foil)
+		(foil)(flow)
+		#data containers
+		old_mus, old_phis = zeros(3,foil.N), zeros(3,foil.N)   
+		phi = zeros(foil.N)
+		cps = []
+		for i in 1:flow.Ncycles*flow.N
+			time_increment!(flow, foil, wake)
+			phi =  get_phi(foil, wake)
+			p, old_mus, old_phis = panel_pressure(foil, flow, old_mus, old_phis, phi)
+			# coeffs[:,i] .= get_performance(foil, flow, p)
+		
+			push!(cps, p)
+		end
+		mid = foil.N ÷2 +1
+
+		f = plot(foil.col[1,1:mid], cps[end][1:mid]./(0.5*flow.Uinf^2),marker=:circle, label="Bottom")
+		plot!(foil.col[1,mid:end], cps[end][mid:end]./(0.5*flow.Uinf^2),marker=:circle, label="Top")
+		plot!(xlabel="x/c", ylabel="C_p", legend=:bottomright, title!("C_p vs x/c for α = $(α)"))
+		plot!(ylim=(-1.5,5.0))
+		f
 	end
-	mid = foil.N ÷2 +1
-
-	plot(foil.col[1,1:mid], cps[end][1:mid]./(0.5*flow.Uinf^2),marker=:circle, label="Bottom")
-	plot!(foil.col[1,mid:end], cps[end][mid:end]./(0.5*flow.Uinf^2),marker=:circle, label="Top")
-	plot!(xlabel="x/c", ylabel="C_p", legend=:bottomright, title!("C_p vs x/c for f = $(aoaComp[:f])"))
-	plot!(ylim=(-1.5,2.5))
+	gif(movie, "aoa.gif", fps = 2)
 end
 
 

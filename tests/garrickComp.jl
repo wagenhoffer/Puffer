@@ -6,8 +6,8 @@ using Plots
 begin
 	garrick = deepcopy(defaultDict)
 	garrick[:Nt] = 150
-	garrick[:Ncycle] = 5
-	garrick[:f] = 0.25
+	garrick[:Ncycles] = 5
+	garrick[:f] = 1.5
     garrick[:Uinf] = 2.0
 	garrick[:kine] = :make_heave_pitch
 	θ0 = deg2rad(5)
@@ -22,14 +22,14 @@ begin
 	RHO = RHO = 1.0
 	b = foil.chord / 2.0
 	
-	t = flow.Δt:flow.Δt:flow.N*flow.Ncycles*flow.Δt
+	# t = flow.Δt:flow.Δt:flow.N*flow.Ncycles*flow.Δt
 	t = LinRange(0,flow.Ncycles/foil.f,flow.Ncycles*flow.N)
 	
 	ω = 2π * foil.f
-	k = ω * b / flow.Uinf
-    ϕ = pi/2*(flow.Uinf/foil.f)
-	ϕ = -pi/2
-	ϕ = 0.0
+	k = ω *b / flow.Uinf
+    # ϕ = -pi*(flow.Uinf/foil.f)/4.0
+	ϕ = pi
+	# ϕ = 0.0
 	@show ϕ
 	a = -1.0 #-1 is rotation about leading edge
 	theo = 1im * hankelh1(1, k) / (hankelh1(0, k) + 1im * hankelh1(1, k))
@@ -52,25 +52,29 @@ begin
     @show k, ϕ , k/ϕ
 	
 	plot(t[25:end], coeffs[2, 25:end], marker = :circle, lw = 0, ms = 3, label = "BEM  \$C_L\$")
-	plot!(t, -inst_lift, label = "Garrick  \$C_L\$",lw=3)
+	plot!(t, inst_lift, label = "Garrick  \$C_L\$",lw=3)
 	# plot!(t, real(M), label="Garrick  \$C_M\$")
    
 end
+begin
+	#Katz and Plotkin eqn 13.73a
+	phi = ϕ = π/2
+	alpha = θ0*sin.(ω*t .+ phi)
+	heave = h0*sin.(ω*t)
+	alphadot = θ0*ω*cos.(ω*t .+ phi)
+	alphadotdot = -θ0*ω^2*sin.(ω*t .+ phi)
+	hdot = h0*ω*cos.(ω*t)
+	hdotdot = -h0*ω^2*sin.(ω*t)
+	kk = ω*foil.chord/2/flow.Uinf
+	lift = π*RHO*flow.Uinf*foil.chord*theod(k)*(flow.Uinf*alpha - hdot + 0.75*foil.chord*alphadot) + 
+		π*RHO*foil.chord^2/4.0 *(flow.Uinf*alphadot - hdotdot + foil.chord/2.0*alphadotdot)
 
-#Katz and Plotkin eqn 13.73a
-phi = ϕ = π/2
-alpha = θ0*sin.(ω*t .+ phi)
-heave = h0*sin.(ω*t)
-alphadot = θ0*ω*cos.(ω*t .+ phi)
-alphadotdot = -θ0*ω^2*sin.(ω*t .+ phi)
-hdot = h0*ω*cos.(ω*t)
-hdotdot = -h0*ω^2*sin.(ω*t)
-kk = ω*foil.chord/2/flow.Uinf
-lift = π*RHO*flow.Uinf*foil.chord*theod(k)*(flow.Uinf*alpha - hdot + 0.75*foil.chord*alphadot) + 
-	   π*RHO*foil.chord^2/4.0 *(flow.Uinf*alphadot - hdotdot + foil.chord/2.0*alphadotdot)
+	plot(t, real(lift), label="Katz and Plotkin  \$C_L\$",lw=3)
+	plot!(t[25:end], coeffs[2, 25:end], marker = :circle, lw = 0, ms = 3, label = "BEM  \$C_L\$")
+end
 
-plot(t, real(lift), label="Katz and Plotkin  \$C_L\$",lw=3)
-plot!(t[25:end], coeffs[2, 25:end], marker = :circle, lw = 0, ms = 3, label = "BEM  \$C_L\$")
+
+
 
 #Katz and Plotkin 13.74a
 M0 = - π*RHO*foil.chord^2/4*(-b*hdotdot+3*flow.Uinf*b/2*alphadot + 9/32*foil.chord^2*alphadotdot +flow.Uinf*theod(k)*(-hdot +flow.Uinf*alpha+3*b/2*alphadot))
