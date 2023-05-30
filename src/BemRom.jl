@@ -52,6 +52,7 @@ mutable struct Foil{T} <: Body
     wake_ind_vel::Matrix{T} #velocity induced by wake at collocation points
     ledge::Matrix{T} #leading edge panel 
     μ_ledge::Vector{T} #leading edge doublet strength
+    pivot::T # where the foil pivots about as a fraction of chord
 end
 
 mutable struct Wake{T}
@@ -194,7 +195,7 @@ function init_params(; kwargs...)
 	edge_vec = Uinf * Δt * [(txty[1, end] - txty[1, 1]), (txty[2, end] - txty[2, 1])] .|> T
 	edge = [naca0012[:, end] (naca0012[:, end] .+ 0.5 * edge_vec) (naca0012[:, end] .+ 1.5 * edge_vec)]
 	            #  kine, f,    k,             N,    _foil,    foil ,       col,          σs,          μs, edge,   μ_edge,chord,normals, tangents, panel_lengths, panbel_vel, wake_ind_vel, ledge, μ_ledge
-	foil = Foil{T}(kine, T(f), T(kwargs[:k]), N, naca0012, copy(naca0012), col, zeros(T, N), zeros(T, N), edge, zeros(T, 2), 1, nxny, txty, ll[:], zeros(size(nxny)),zeros(size(nxny)),zeros(T, 3,2),zeros(T,2))
+	foil = Foil{T}(kine, T(f), T(kwargs[:k]), N, naca0012, copy(naca0012), col, zeros(T, N), zeros(T, N), edge, zeros(T, 2), 1, nxny, txty, ll[:], zeros(size(nxny)),zeros(size(nxny)),zeros(T, 3,2),zeros(T,2), T(kwargs[:pivot]))
     foil, fp
 end
 
@@ -206,10 +207,11 @@ defaultDict = Dict(:T     => Float64,
 	:k     => 1,
 	:chord => 1.0,
 	:Nt    => 150,
-    :Ncycles  => 1,
-	:Uinf  => 1.0,
-	:ρ     => 1000.0, 
-    :Nfoils => 1)
+    :Ncycles => 1,
+	:Uinf   => 1.0,
+	:ρ      => 1000.0, 
+    :Nfoils => 1,
+    :pivot  => 0.0)
 
 get_mdpts(foil) = (foil[:, 2:end] + foil[:, 1:end-1]) ./ 2
 
@@ -257,9 +259,9 @@ function (foil::Foil)(flow::FlowParams)
 end
 
 
-function rotate_about!(foil, θ; chord_loc=0.0)
-    foil.foil = ([foil._foil[1, :] .- chord_loc foil._foil[2, :]] * rotation(θ))'
-    foil.foil[1, :] .+= chord_loc
+function rotate_about!(foil, θ)
+    foil.foil = ([foil._foil[1, :] .- foil.pivot foil._foil[2, :]] * rotation(θ))'
+    foil.foil[1, :] .+= foil.pivot
 end
 
 
@@ -584,6 +586,16 @@ function get_dphidt!(oldphi, phi, flow::FlowParams)
     dmudt, oldphi
 end
 
+function get_dt(values, flow::FlowParams)
+     (3 * values[1, :] - 4 * values[2, :] + values[2, :]) / (2 * flow.Δt)
+end
+
+function roll_values!(oldvals, newval)
+    oldvals = circshift(oldvals, (1, 0))
+    oldvals[1, :] = newval
+    oldvals    
+end
+
 function edge_to_body(foil::Foil, flow::FlowParams)
     Γs = [-foil.μ_edge[1] foil.μ_edge[1]]
     ps = foil.edge[:, 1:2]
@@ -610,7 +622,7 @@ function run_sim(; kwargs...)
     # Create a wake object for the foil
     wake = Wake(foil)
     # Initialize the previous time step's vorticity values
-    old_mus = zeros(3, foil.N)::Foil
+    old_mus = zeros(3, foil.N)
     old_phis = zeros(3, foil.N)
     #coefficients of force, lift, thrust, power
     coeffs = zeros(4, steps)
@@ -628,7 +640,9 @@ function run_sim(; kwargs...)
         body_to_wake!(wake, foil, flow)
         wake_self_vel!(wake, flow)
         phi =  get_phi(foil, wake)
-        p, old_mus, old_phis = panel_pressure(foil, flow, old_mus, old_phis, phi)
+        p = panel_pressure(foil, flow, old_mus, old_phis, phi)
+        old_mus = [foil.μs'; old_mus[1:2,:]]
+        old_phis = [phi'; old_phis[1:2,:]]
         coeffs[:,i] .= get_performance(foil, flow, p)
              
         move_wake!(wake, flow)
@@ -658,8 +672,12 @@ function panel_pressure(foil::Foil, flow,  old_mus, old_phis, phi)
     # wake_ind += edge_to_body(foil, flow)
     normal_wake_ind = sum(foil.wake_ind_vel .* foil.normals, dims=1)'
 
-    dmudt, old_mus = get_dmudt!(old_mus, foil, flow)
-    dphidt, old_phis = get_dphidt!(old_phis, phi, flow)
+    # dmudt, old_mus = get_dmudt!(old_mus, foil, flow)
+    # dphidt, old_phis = get_dphidt!(old_phis, phi, flow)
+    #do the roll outide of this function, allows for iteration
+    dmudt = get_dt([foil.μs'; old_mus[1:2,:]],flow)
+    dphidt = get_dt([phi'; old_phis[1:2,:]],flow)
+    
 
     qt = get_qt(foil)
     qt .+= repeat((foil.σs)', 2, 1) .* foil.normals 
@@ -673,7 +691,7 @@ function panel_pressure(foil::Foil, flow,  old_mus, old_phis, phi)
     ∫∞→Px1 d(∇×Ψ)/dt dC + dΦ/dt|body - (VG + VGp + (Ωxr))⋅∇Φ + 1/2||∇Φ +(∇×Ψ)|^2  = Pinf - Px1 /ρ
     """
     p = p_s + p_us
-    p, old_mus, old_phis
+    p
 end
 
 """
