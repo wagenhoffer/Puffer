@@ -49,7 +49,9 @@ begin
     for i in 1:flow.Ncycles*flow.N
         time_increment!(flow, foil, wake)
         phi =  get_phi(foil, wake)                                   
-        p, old_mus, old_phis = panel_pressure(foil, flow,  old_mus, old_phis, phi)        
+        p = panel_pressure(foil, flow,  old_mus, old_phis, phi)        
+        old_mus = [foil.μs'; old_mus[1:2,:]]
+        old_phis = [phi'; old_phis[1:2,:]]
         coeffs[:,i] = get_performance(foil, flow, p)
         ps[:,i] = p
     end
