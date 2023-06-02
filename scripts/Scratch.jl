@@ -4,12 +4,13 @@ using Plots
 
 
 heave_pitch = deepcopy(defaultDict)
+heave_pitch[:N] =12
 heave_pitch[:Nt] = 64
-heave_pitch[:Ncycles] = 4
-heave_pitch[:f] = 0.25
-heave_pitch[:Uinf] = 1
+heave_pitch[:Ncycles] = 5
+heave_pitch[:f] = 1.
+heave_pitch[:Uinf] = 2
 heave_pitch[:kine] = :make_heave_pitch
-θ0 = deg2rad(30)
+θ0 = deg2rad(10)
 h0 = 0.0
 heave_pitch[:motion_parameters] = [h0, θ0]
 
@@ -21,7 +22,7 @@ begin
     wake = Wake(foil)
     (foil)(flow)
     ### EXAMPLE OF AN ANIMATION LOOP
-    movie = @animate for i in 1:flow.Ncycles*flow.N
+    movie = @animate for i in 1:flow.Ncycles*flow.N*1.75
         time_increment!(flow, foil, wake)
         # Nice steady window for plotting
         win = (minimum(foil.foil[1, :]') - foil.chord / 2.0, maximum(foil.foil[1, :]) + foil.chord * 2)
@@ -32,6 +33,16 @@ begin
         f
     end
     gif(movie, "handp.gif", fps=10)
+end
+
+begin
+    f = plot_current(foil, wake)
+    f
+    plot!(f, foil.foil[1,:],foil.foil[2,:], marker=:bar,label="Panels")
+    plot!(f, cb=:none)
+    plot!(f, showaxis=false)
+    plot!(f, size=(600,200))
+    plot!(f, grid=:off)
 end
 
 begin
@@ -61,7 +72,7 @@ begin
     b = plot(t[start:end], coeffs[2,start:end], label="Lift"   ,lw = 3, marker=:circle)
     c = plot(t[start:end], coeffs[3,start:end], label="Thrust" ,lw = 3, marker=:circle)
     d = plot(t[start:end], coeffs[4,start:end], label="Power"  ,lw = 3, marker=:circle)
-    plot(a,b,c,d, layout=(2,2), legend=:topleft, size =(1000,1000))
+    plot(a,b,c,d, layout=(2,2), legend=:topleft, size =(800,800))
 end
 
 begin

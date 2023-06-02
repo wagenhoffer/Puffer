@@ -170,7 +170,10 @@ begin
     end
     gif(movie, "handp.gif", fps=10)
 end
-
+begin 
+    f = plot_current(foil, wake)
+    f
+end
 begin
     foil, flow = init_params(;fixedangle...)
     foil._foil = (foil._foil' * rotation(-fixedangle[:aoa])')'
