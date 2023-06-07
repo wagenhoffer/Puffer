@@ -70,10 +70,19 @@ end
 """ functions """
 Wake() = Wake([0, 0], 0.0, [0, 0])
 #initial with the buffer panel to be cancelled
-function Wake(foil::Foil{T}) where {T<:Real}
+function Wake(foil::Foil{T}) where T<:Real
     Wake{T}(reshape(foil.edge[:, end], (2, 1)), [-foil.μ_edge[end]], [0.0 0.0]')
 end
-
+function Wake(foils::Vector{Foil{T}}) where {T<:Real}
+    N = length(foils)
+    xy = zeros(2,N)
+    Γs = zeros(N)
+    uv = zeros(2,N)
+    for (i,foil) in enumerate(foils)
+        xy[:,i] = foil.edge[:,end]
+    end
+    Wake{T}(xy, Γs, uv)
+end
 # NACA0012 Foil
 function make_naca(N; chord=1, thick=0.12)
     # N = 7
@@ -257,11 +266,36 @@ function (foil::Foil)(flow::FlowParams)
     move_edge!(foil, flow)
     flow.n += 1
 end
-
+function do_kinematics!(foils::Vector{Foil{T}}, flow::FlowParams) where T<:Real
+    for foil in foils
+    #perform kinematics
+        if typeof(foil.kine) == Vector{Function}
+            le = foil.foil[1,foil.N÷2 + 1]
+            h = foil.kine[1](foil.f, flow.n * flow.Δt)
+            θ = foil.kine[2](foil.f, flow.n * flow.Δt, -π/2)
+            rotate_about!(foil, θ)
+            foil.foil[2, :] .+= h
+            #Advance the foil in flow
+            foil.foil[1,:] .+= le
+            foil.foil .+= [-flow.Uinf, 0] .* flow.Δt 
+            
+        else
+            foil.foil[2, :] = foil._foil[2, :] .+ foil.kine.(foil._foil[1, :], foil.f, foil.k, flow.n * flow.Δt)
+            #Advance the foil in flow
+            foil.foil .+= [-flow.Uinf, 0] .* flow.Δt
+        end
+        norms!(foil)
+        set_collocation!(foil)
+        move_edge!(foil, flow)
+    end
+    flow.n += 1
+    nothing
+end
 
 function rotate_about!(foil, θ)
+
     foil.foil = ([foil._foil[1, :] .- foil.pivot foil._foil[2, :]] * rotation(θ))'
-    foil.foil[1, :] .+= foil.pivot
+    foil.foil[1, :] .+= foil.pivot 
 end
 
 
@@ -499,6 +533,7 @@ function set_ledge_strength!(foil::Foil)
     foil.μ_ledge[1] = foil.μs[mid] - foil.μs[mid+1]
     nothing
 end
+
 function cancel_buffer_Γ!(wake::Wake, foil::Foil)
     #TODO : Add iterator for matching 1->i for nth foil
     wake.xy[:, 1] = foil.edge[:, end]
@@ -507,6 +542,19 @@ function cancel_buffer_Γ!(wake::Wake, foil::Foil)
     if foil.μ_ledge[2] != 0
         wake.xy[:, 2] = foil.ledge[:, end]
         wake.Γ[2] = -foil.μ_ledge[end]
+    end
+    nothing
+end
+
+function cancel_buffer_Γ!(wake::Wake{T}, foils::Vector{Foil{T}}) where T<:Real
+    for i in CartesianIndices(foils)
+        wake.xy[:, i] = foils[i].edge[:, end]
+        wake.Γ[i] = -foils[i].μ_edge[end]
+        #LESP --> TODO: fix for multiple swimmers
+        if foils[i].μ_ledge[2] != 0
+            wake.xy[:, 2] = foil.ledge[:, end]
+            wake.Γ[2] = -foil.μ_ledge[end]
+        end
     end
     nothing
 end
@@ -524,6 +572,26 @@ function plot_current(foil::Foil, wake::Wake; window=nothing)
     plot!(a, foil.edge[1, :], foil.edge[2, :], label="")
     plot!(a, wake.xy[1, :], wake.xy[2, :],
         # markersize=wake.Γ .* 10, st=:scatter, label="",
+        markersize=3, st=:scatter, label="", msw=0, xlims=xs,
+        marker_z=-wake.Γ, #/mean(abs.(wake.Γ)),
+        color=cgrad(:coolwarm),
+        clim=(-max_val, max_val))
+    a
+end
+function plot_current(foils::Vector{Foil{T}}, wake::Wake; window=nothing) where T <: Real
+    if !isnothing(window)
+        xs = (window[1], window[2])
+    else
+        xs = :auto
+    end
+    max_val = maximum(abs, wake.Γ)
+    max_val = std(wake.Γ) / 2.0
+    a = plot()
+    for foil in foils
+        plot!(a,foil.foil[1, :], foil.foil[2, :], aspect_ratio=:equal, label="")
+        plot!(a, foil.edge[1, :], foil.edge[2, :], label="")
+    end
+    plot!(a, wake.xy[1, :], wake.xy[2, :],    
         markersize=3, st=:scatter, label="", msw=0, xlims=xs,
         marker_z=-wake.Γ, #/mean(abs.(wake.Γ)),
         color=cgrad(:coolwarm),
@@ -724,33 +792,50 @@ function time_increment!(flow::FlowParams, foil::Foil, wake::Wake)
     nothing
 end
 
-# end
+function time_increment!(flow::FlowParams, foils::Vector{Foil}, wake::Wake)
+    A, rhs, edge_body = make_infs(foils) #̌#CHECK
+    [setσ!(foil, flow) for foil in foils] #CHECK
+    σs = [] #CHECK
+    buff = []
+    for (i, foil) in enumerate(foils)
+        foil.wake_ind_vel = vortex_to_target(wake.xy, foil.col, wake.Γ, flow)
+        normal_wake_ind = sum(foil.wake_ind_vel .* foil.normals, dims=1)'
+        foil.σs -= normal_wake_ind[:]
+        push!(σs, foil.σs...)
+        push!(buff, (edge_body[:,i] * foil.μ_edge[1])...)    
+    end
+    μs =  A \ (-rhs*σs - buff)
+    for (i, foil) in enumerate(foils)
+        foil.μs = μs[(i-1)*foil.N+1:i*foil.N]
+    end
+    set_edge_strength!.(foils)
+    cancel_buffer_Γ!(wake, foils)
+    wake_self_vel!(wake, flow)
+    totalN   = sum(foil.N for foil in foils)
+    phis     = zeros(totalN)
+    ps       = zeros(totalN)
+    old_mus  = zeros(3, totalN)
+    old_phis = zeros(3, totalN)
+    coeffs   = zeros(length(foils), 4, steps)
+    for  (i, foil) in enumerate(foils)
+        body_to_wake!(wake, foil, flow)
+        phi =  get_phi(foil, wake)
+        phis[(i-1)*foils[i].N+1:i*foils[i].N] = phi
+        p  = panel_pressure(foil, flow, old_mus[:,(i-1)*foils[i].N+1:i*foils[i].N],
+                                                old_phis[:,(i-1)*foils[i].N+1:i*foils[i].N], phi)
+        ps[(i-1)*foils[i].N+1:i*foils[i].N] = p
+        coeffs[i, : , 1] .= get_performance(foil, flow, p)
+    end
+    old_mus = [μs'; old_mus[1:2,:]]
+    old_phis = [phis'; old_phis[1:2,:]]
+        
+    move_wake!(wake, flow)
+    for foil in foils
+        release_vortex!(wake, foil)
+    end
+    do_kinematics!(foils,flow)
+    nothing
+end
 
 
-# #### TODO LIST WHAT NEEDS TO BE VEC'D FOR MULTI and what can LOOP
-# A, rhs, edge_body = make_infs(foils) #̌#CHECK
-# [setσ!(foil, flow) for foil in foils] #CHECK
-# σs = [] #CHECK
-# buff = []
-# for (i, foil) in enumerate(foils)
-#     foil.wake_ind_vel = vortex_to_target(wake.xy, foil.col, wake.Γ, flow)
-#     normal_wake_ind = sum(foil.wake_ind_vel .* foil.normals, dims=1)'
-#     foil.σs -= normal_wake_ind[:]
-#     push!(σs, foil.σs...)
-#     push!(buff, (edge_body[:,i] * foil.μ_edge[1])...)    
-# end
-# μs =  A \ (-rhs*σs - buff)
-# for (i, foil) in enumerate(foils)
-#     foil.μs = μs[(i-1)*foil.N+1:i*foil.N]
-# end
-# set_edge_strength!.(foils)
-# cancel_buffer_Γ!(wake, foil)
-# body_to_wake!(wake, foil, flow)
-# wake_self_vel!(wake, flow)
-# phi =  get_phi(foil, wake)
-# p, old_mus, old_phis = panel_pressure(foil, flow, wake_ind, old_mus, old_phis, phi)
-# coeffs[:,i] .= get_performance(foil, flow, p)
-     
-# move_wake!(wake, flow)
-# release_vortex!(wake, foil)
-# (foil)(flow)
+
