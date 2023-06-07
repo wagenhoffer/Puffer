@@ -6,13 +6,13 @@ using IntervalSets
 
 
 heave_pitch = deepcopy(defaultDict)
-heave_pitch[:N] = 50
+heave_pitch[:N] = 12
 heave_pitch[:Nt] = 64
 heave_pitch[:Ncycles] = 1
 heave_pitch[:f] = 1.0
 heave_pitch[:Uinf] = 1.0
 heave_pitch[:kine] = :make_heave_pitch
-θ0 = deg2rad(10)
+θ0 = deg2rad(5)
 h0 = 0.0
 heave_pitch[:motion_parameters] = [h0, θ0]
 
@@ -28,6 +28,162 @@ begin
     end
     plot_current(foil,wake)
 end
+
+function fence!(dest,tree::Cell,foil::Foil, wake::Wake)
+    for i in 1:size(foil.foil)[2]-1
+        #TODO: make a collect then iterate over it later
+        node = findleaf(tree, foil.foil[:,i])       
+        if length(node.data)>0    
+            # start by only looking to the next panel, filter to yield indexing for multiple intersections
+            sects = map( x -> find_intersection(foil.foil[:,i], foil.foil[:,i+1], x[1], x[2]),
+                        [[wake.xy[:,node.data], dest[:,node.data]] for i =1:length(node.data)])
+            for (ind, sect) in enumerate(sects)                
+                if !isnothing(sect)
+                    vdist = wake.xy[:,node.data[ind]] - dest[:,node.data[ind]] 
+                    tointersetion   = sects[1] - wake.xy[:,node.data[ind]]                    
+                    rest  = abs(norm(vdist) - norm(tointersetion))                    
+                    dest[:,node.data[ind]] = sect + foil.tangents[:,i+1] *rest                    
+                end
+            end    
+        end 
+    end
+    nothing    
+end
+
+function fence!(dest,tree::Cell, pos , wake::Wake)
+    tangents, normals,_ =norms(pos)
+    for i in 1:size(pos)[2]-1
+
+        node = findleaf(tree, pos[:,i])       
+        if length(node.data)>0    
+            # start by only looking to the next panel, filter to yield indexing for multiple intersections
+            sects = map( x -> find_intersection(pos[:,i], pos[:,i+1], x[1], x[2]),
+                        [[wake.xy[:,node.data], dest[:,node.data]] for i =1:length(node.data)])
+            for (ind, sect) in enumerate(sects)                
+                if !isnothing(sect)
+                    vdist = wake.xy[:,node.data[ind]] - dest[:,node.data[ind]] 
+                    tointersetion   = (sect + flow.δ*normals[:,i]/2.0) - wake.xy[:,node.data[ind]]                    
+                    rest  = abs(norm(vdist) - norm(tointersetion))                    
+                    dest[:,node.data[ind]] = (sect + flow.δ*normals[:,i]/2.0) + tangents[:,i] *rest                    
+                end
+            end    
+        end 
+    end
+    nothing    
+end
+
+function find_intersection(p0, p1, p2, p3)
+    """ p0->p1 and p2->p3 
+        returns intersection_point of the lines """
+    s10_x = p1[1] - p0[1]
+    s10_y = p1[2] - p0[2]
+    s32_x = p3[1] - p2[1]
+    s32_y = p3[2] - p2[2]
+    denom = s10_x * s32_y - s32_x * s10_y
+    if denom == 0
+        return nothing # collinear
+    end
+    denom_is_positive = denom > 0
+    s02_x = p0[1] - p2[1]
+    s02_y = p0[2] - p2[2]
+    s_numer = s10_x * s02_y - s10_y * s02_x
+    if (s_numer < 0) == denom_is_positive
+        return nothing # no collision
+    end
+    t_numer = s32_x * s02_y - s32_y * s02_x
+    if (t_numer < 0) == denom_is_positive
+        return nothing # no collision
+    end
+    if (s_numer > denom) == denom_is_positive || (t_numer > denom) == denom_is_positive
+        return nothing # no collision
+    end
+    # collision detected
+    t = t_numer / denom
+    intersection_point = [p0[1] + t * s10_x, p0[2] + t * s10_y]
+    return intersection_point
+end
+#testing on find_intersection
+@assert [0.0, 0.5] == find_intersection([0,0],[0,1], [-0.5, 0.5], [0.5, 0.5] )
+@assert [0.0, 0.5] == find_intersection([-0.5, 0.5], [0.5, 0.5], [0,0],[0,1])
+@assert [0.5, 0.5] == find_intersection([0.0, 0.0],  [1.0, 1.0], [0,1],[1,0])
+@assert [0.0, -0.5] == find_intersection([0,0],[0,-1], [-0.5, -0.5], [0.5, -0.5] )
+@assert [0.0, -0.5] == find_intersection([-0.5, -0.5], [0.5, -0.5], [0,0],[0,-1])
+@assert [-0.5, -0.5] == find_intersection([0.0, 0.0],  [-1.0, -1.0], [0,-1],[-1,0])
+@assert [0,0] == find_intersection([0.0, 0.0],  [0, 1.0], [0,0], [-1,0])
+@assert nothing == find_intersection([0.0, 0.0],  [0, 1.0], [1,0], [2,0])
+
+function make_qt(wake::Wake,r::distanceRefinery )
+    xmin, ymin = minimum(wake.xy, dims=2)
+    xmax, ymax = maximum(wake.xy, dims=2)
+    width  = xmax -xmin
+    height = ymax - ymin
+    root = Cell(SVector(xmin, ymin), SVector(width,height), collect(1:length(wake.Γ)))
+    adaptivesampling!(root, r)
+    root
+end
+
+struct distanceRefinery <: AbstractRefinery
+    tolerance::Float64
+end
+
+# These two methods split the domain into the tree
+function needs_refinement(r::distanceRefinery, cell)
+    maximum(cell.boundary.widths) > r.tolerance
+end
+
+function refine_data(r::distanceRefinery, cell::Cell, indices)
+
+    curr = child_boundary(cell,indices)
+    intervals = [ClosedInterval(curr.origin[i],curr.origin[i]+curr.widths[i]) for i=1:2]
+    out = zeros(Int64,0)
+    if !isempty(cell.data)
+        for i=1:length(cell.data) 
+            if wake.xy[1,cell.data[i]] in intervals[1] && wake.xy[2,cell.data[i]] in intervals[2]
+                push!(out, cell.data[i])
+            end
+        end
+    end
+    out
+end
+
+
+
+begin
+    foil, flow = init_params(;heave_pitch...)
+    wake = Wake(foil)
+    (foil)(flow)
+    
+     for i in 1:flow.Ncycles*flow.N
+        time_increment!(flow, foil, wake)   
+        dest = wake.xy + wake.uv .* flow.Δt
+        dir = dest.-wake.xy
+        r = distanceRefinery(maximum(abs.(dir))*10.0)
+        tree = make_qt(wake,r)                
+        fence!(dest,tree,foil,wake)
+    end
+    plot_current(foil,wake)
+    wake.xy[1,:] .-= 2.0
+    global pos = next_foil_pos(foil,flow)
+    movie = @animate for i in 1:flow.Ncycles*flow.N
+        pos = next_foil_pos(foil,flow)
+        # move_wake!(wake, flow)   
+        release_vortex!(wake, foil)
+        # pos = next_foil_pos(foil,flow)
+        move_foil!(foil, pos)
+        solve_n_update!(flow, foil, wake) 
+        dest = wake.xy + wake.uv .* flow.Δt
+        r = distanceRefinery(maximum(abs.(dir))*5.0)
+        tree = make_qt(wake,r)          
+        pos = next_foil_pos(foil,flow)
+        # fence!(dest,tree,foil,wake)      
+        fence!(dest,tree,pos,wake)
+        wake.xy = dest
+        f = plot_current(foil,wake)
+        f
+    end
+    gif(movie,"fence.gif")
+end
+
 ###MOVE the wake to in front of the foil
 wake.xy[1,:] .-= 2.1
 plot_current(foil,wake)
@@ -65,30 +221,6 @@ panels = foil.foil
 
 
 
-
-struct MyRefinery <: AbstractRefinery
-    tolerance::Float64
-end
-
-# These two methods are all we need to implement
-function needs_refinement(r::MyRefinery, cell)
-    maximum(cell.boundary.widths) > r.tolerance
-end
-
-function refine_data(r::MyRefinery, cell::Cell, indices)
-
-    curr = child_boundary(cell,indices)
-    intervals = [ClosedInterval(curr.origin[i],curr.origin[i]+curr.widths[i]) for i=1:2]
-    out = zeros(Int64,0)
-    if !isempty(cell.data)
-        for i=1:length(cell.data) 
-            if wake.xy[1,cell.data[i]] in intervals[1] && wake.xy[2,cell.data[i]] in intervals[2]
-                push!(out, cell.data[i])
-            end
-        end
-    end
-    out
-end
 r = MyRefinery(maximum(abs.(dir))*10.0)
 root = Cell(SVector(xmin, ymin), SVector(width,height), collect(1:length(wake.Γ)))
 adaptivesampling!(root, r)
@@ -135,45 +267,6 @@ plt
 
 plot!(plt,foil.foil[1,:],foil.foil[2,:],marker=:hex,ms=.5, label="")
 
-function find_intersection(p0, p1, p2, p3)
-    """ p0->p1 and p2->p3 
-        returns intersection_point of the lines """
-    s10_x = p1[1] - p0[1]
-    s10_y = p1[2] - p0[2]
-    s32_x = p3[1] - p2[1]
-    s32_y = p3[2] - p2[2]
-    denom = s10_x * s32_y - s32_x * s10_y
-    if denom == 0
-        return nothing # collinear
-    end
-    denom_is_positive = denom > 0
-    s02_x = p0[1] - p2[1]
-    s02_y = p0[2] - p2[2]
-    s_numer = s10_x * s02_y - s10_y * s02_x
-    if (s_numer < 0) == denom_is_positive
-        return nothing # no collision
-    end
-    t_numer = s32_x * s02_y - s32_y * s02_x
-    if (t_numer < 0) == denom_is_positive
-        return nothing # no collision
-    end
-    if (s_numer > denom) == denom_is_positive || (t_numer > denom) == denom_is_positive
-        return nothing # no collision
-    end
-    # collision detected
-    t = t_numer / denom
-    intersection_point = [p0[1] + t * s10_x, p0[2] + t * s10_y]
-    return intersection_point
-end
-#testing on find_intersection
-@assert [0.0, 0.5] == find_intersection([0,0],[0,1], [-0.5, 0.5], [0.5, 0.5] )
-@assert [0.0, 0.5] == find_intersection([-0.5, 0.5], [0.5, 0.5], [0,0],[0,1])
-@assert [0.5, 0.5] == find_intersection([0.0, 0.0],  [1.0, 1.0], [0,1],[1,0])
-@assert [0.0, -0.5] == find_intersection([0,0],[0,-1], [-0.5, -0.5], [0.5, -0.5] )
-@assert [0.0, -0.5] == find_intersection([-0.5, -0.5], [0.5, -0.5], [0,0],[0,-1])
-@assert [-0.5, -0.5] == find_intersection([0.0, 0.0],  [-1.0, -1.0], [0,-1],[-1,0])
-@assert [0,0] == find_intersection([0.0, 0.0],  [0, 1.0], [0,0], [-1,0])
-@assert nothing == find_intersection([0.0, 0.0],  [0, 1.0], [1,0], [2,0])
 
 #run through the control block above, but now look for intersections
 begin
@@ -217,64 +310,4 @@ begin
     end
     plot!(plt,foil.foil[1,:],foil.foil[2,:],label="")
     plt
-end
-
-
-
-function fence!(dest,tree::Cell,foil::Foil, wake::Wake)
-    for i in 1:size(foil.foil)[2]-1
-        #TODO: make a collect then iterate over it later
-        node = findleaf(tree, foil.foil[:,i])       
-        if length(node.data)>0    
-            # start by only looking to the next panel, filter to yield indexing for multiple intersections
-            sects = map( x -> find_intersection(foil.foil[:,i], foil.foil[:,i+1], x[1], x[2]),
-                        [[wake.xy[:,node.data], dest[:,node.data]] for i =1:length(node.data)])
-            for (ind, sect) in enumerate(sects)                
-                if !isnothing(sect)
-                    vdist = wake.xy[:,node.data[ind]] - dest[:,node.data[ind]] 
-                    tointersetion   = sects[1] - wake.xy[:,node.data[ind]]                    
-                    rest  = abs(norm(vdist) - norm(tointersetion))                    
-                    dest[:,node.data[ind]] = sect + foil.tangents[:,i+1] *rest                    
-                end
-            end    
-        end 
-    end
-    nothing    
-end
-
-function make_qt(wake::Wake)
-    xmin   = minimum([wake.xy[1,:] dest[1,:]])
-    ymin   = minimum([wake.xy[2,:] dest[2,:]])
-    width  = xmax -xmin
-    height = ymax - ymin
-    root = Cell(SVector(xmin, ymin), SVector(width,height), collect(1:length(wake.Γ)))
-    adaptivesampling!(root, r)
-    root
-end
-
-fence!(dest,root, foil,wake)
-
-
-begin
-    foil, flow = init_params(;heave_pitch...)
-    wake = Wake(foil)
-    (foil)(flow)
-    
-     for i in 1:flow.Ncycles*flow.N
-        time_increment!(flow, foil, wake)   
-        dest = wake.xy + wake.uv .* flow.Δt
-        tree = make_qt(wake)                
-        fence!(dest,tree,foil,wake)
-    end
-    plot_current(foil,wake)
-    wake.xy[1,:] .-=2.0
-    movie = @animate for i in 1:flow.Ncycles*flow.N
-        time_increment!(flow, foil, wake)   
-        dest = wake.xy + wake.uv .* flow.Δt
-        tree = make_qt(wake)                
-        # fence!(dest,tree,foil,wake)
-        f = plot_current(foil,wake)
-        f
-    end
-    gif(movie,"fence.gif")
 end

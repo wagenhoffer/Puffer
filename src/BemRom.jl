@@ -266,6 +266,32 @@ function (foil::Foil)(flow::FlowParams)
     move_edge!(foil, flow)
     flow.n += 1
 end
+function next_foil_pos(foil::Foil, flow::FlowParams)
+    #perform kinematics
+    if typeof(foil.kine) == Vector{Function}
+        h = foil.kine[1](foil.f, flow.n * flow.Δt)
+        θ = foil.kine[2](foil.f, flow.n * flow.Δt, -π/2)
+        pos = rotate_about(foil, θ)
+        pos[2, :] .+= h
+        #Advance the foil in flow
+        pos .+= [-flow.Uinf, 0] .* flow.Δt .* flow.n
+    else
+        pos = deepcopy(foil.foil)
+        pos[2, :] = foil._foil[2, :] .+ foil.kine.(foil._foil[1, :], foil.f, foil.k, flow.n * flow.Δt)
+        #Advance the foil in flow
+        pos .+= [-flow.Uinf, 0] .* flow.Δt
+    end
+    pos
+end
+
+function move_foil!(foil::Foil, pos)
+    foil.foil = pos
+    norms!(foil)
+    set_collocation!(foil)
+    move_edge!(foil, flow)
+    flow.n += 1
+end
+
 function do_kinematics!(foils::Vector{Foil{T}}, flow::FlowParams) where T<:Real
     for foil in foils
     #perform kinematics
@@ -296,6 +322,12 @@ function rotate_about!(foil, θ)
 
     foil.foil = ([foil._foil[1, :] .- foil.pivot foil._foil[2, :]] * rotation(θ))'
     foil.foil[1, :] .+= foil.pivot 
+    nothing
+end
+function rotate_about(foil, θ)
+    pos = ([foil._foil[1, :] .- foil.pivot foil._foil[2, :]] * rotation(θ))'
+    pos[1, :] .+= foil.pivot 
+    pos
 end
 
 
@@ -792,10 +824,25 @@ function time_increment!(flow::FlowParams, foil::Foil, wake::Wake)
     nothing
 end
 
+function solve_n_update!(flow::FlowParams, foil::Foil, wake::Wake)
+    A, rhs, edge_body = make_infs(foil)
+    setσ!(foil, flow)    
+    foil.wake_ind_vel = vortex_to_target(wake.xy, foil.col, wake.Γ, flow)
+    normal_wake_ind = sum(foil.wake_ind_vel .* foil.normals, dims=1)'
+    foil.σs -= normal_wake_ind[:]
+    buff = edge_body * foil.μ_edge[1]
+    foil.μs = A \ (-rhs*foil.σs-buff)[:]
+    set_edge_strength!(foil)
+    cancel_buffer_Γ!(wake, foil)
+    body_to_wake!(wake, foil, flow)
+    wake_self_vel!(wake, flow)    
+    nothing
+end
+
 function time_increment!(flow::FlowParams, foils::Vector{Foil}, wake::Wake)
-    A, rhs, edge_body = make_infs(foils) #̌#CHECK
-    [setσ!(foil, flow) for foil in foils] #CHECK
-    σs = [] #CHECK
+    A, rhs, edge_body = make_infs(foils) 
+    [setσ!(foil, flow) for foil in foils] 
+    σs = [] 
     buff = []
     for (i, foil) in enumerate(foils)
         foil.wake_ind_vel = vortex_to_target(wake.xy, foil.col, wake.Γ, flow)
