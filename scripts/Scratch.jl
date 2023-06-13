@@ -10,8 +10,8 @@ heave_pitch[:Ncycles] = 5
 heave_pitch[:f] = 1.
 heave_pitch[:Uinf] = 2
 heave_pitch[:kine] = :make_heave_pitch
-θ0 = deg2rad(10)
-h0 = 0.0
+θ0 = deg2rad(0)
+h0 = 0.1
 heave_pitch[:motion_parameters] = [h0, θ0]
 
 foil, flow = init_params(;heave_pitch...)
@@ -30,7 +30,8 @@ begin
         # win = (minimum(foil.foil[1, :]') + 3*foil.chord / 4.0, maximum(foil.foil[1, :]) + foil.chord * 0.1)
         win=nothing
         f = plot_current(foil, wake;window=win)
-        f
+        plot!(f, ylims=(-1,1))
+        plot!(title="$(foil.panel_vel[2,6])")
     end
     gif(movie, "handp.gif", fps=10)
 end

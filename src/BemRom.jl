@@ -266,6 +266,7 @@ function (foil::Foil)(flow::FlowParams)
     move_edge!(foil, flow)
     flow.n += 1
 end
+
 function next_foil_pos(foil::Foil, flow::FlowParams)
     #perform kinematics
     if typeof(foil.kine) == Vector{Function}
@@ -329,9 +330,6 @@ function rotate_about(foil, θ)
     pos[1, :] .+= foil.pivot 
     pos
 end
-
-
-
 
 
 """
