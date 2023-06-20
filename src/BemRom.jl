@@ -803,7 +803,7 @@ grab metrics of the foil.
 """
 function time_increment!(flow::FlowParams, foil::Foil, wake::Wake)
     if flow.n != 1
-        move_wake!(wake, flow)   
+        # move_wake!(wake, flow)   
         release_vortex!(wake, foil)
     end    
     (foil)(flow)

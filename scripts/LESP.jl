@@ -10,15 +10,16 @@ function plot_ledge(foil::Foil, ledge)
 end
 
 function set_ledge!(foil::Foil, flow::FlowParams)
-    front = foil.N ÷ 2 + 1
-    # le_norm = (foil.normals[:,front-1]+foil.normals[:,front])*flow.Uinf*flow.Δt
-    le_norm = foil.normals[:,front]*flow.Uinf*flow.Δt
+    front = foil.N ÷ 2 
+    le_norm = sum(foil.normals[:,front:front+1], dims=2)/2.0*flow.Uinf*flow.Δt
     #initial the ledge
-    if flow.n ==1
-        foil.ledge = [foil.foil[:,front] foil.foil[:,front] .+ le_norm*1.0 foil.foil[:,front] .+ le_norm*1.4 ]
-    else
-        foil.ledge = [foil.foil[:,front] foil.foil[:,front] .+ le_norm*1.0 foil.ledge[:,2]]  
-    end
+    front += 1
+    foil.ledge = [foil.foil[:,front] foil.foil[:,front] .+ le_norm*0.4 foil.foil[:,front] .+ le_norm*1.4 ]
+    # if flow.n ==1
+    #     foil.ledge = [foil.foil[:,front] foil.foil[:,front] .+ le_norm*0.4 foil.foil[:,front] .+ le_norm*1.4 ]
+    # else
+    #     foil.ledge = [foil.foil[:,front] foil.foil[:,front] .+ le_norm*0.4 foil.ledge[:,2]]  
+    # end
 end
 
 function ledge_inf(foil::Foil)
@@ -48,18 +49,18 @@ end
 ### ###
 
 fixedangle = deepcopy(defaultDict)
-fixedangle[:N] = 8
+fixedangle[:N] =64
 fixedangle[:Nt] = 64
 fixedangle[:Ncycles] = 3
-fixedangle[:f] = 0.5
+fixedangle[:f] = 1.0
 fixedangle[:Uinf] = 1
 # fixedangle[:kine] = :make_eldredge
 fixedangle[:kine] = :make_heave_pitch
-θ0 = deg2rad(10.0)
+θ0 = deg2rad(0.0)
 h0 = 0.0
 fixedangle[:motion_parameters] = [h0, θ0]
 # fixedangle[:motion_parameters] = [θ0, 1000.]
-fixedangle[:aoa] = deg2rad(20.0)
+fixedangle[:aoa] = deg2rad(19)
 fixedangle[:pivot] = 0.5
 
 # delete!(fixedangle, :motion_parameters)
@@ -84,6 +85,7 @@ begin
     animated = true
     anim = Animation()    
     # movie = @animate for i in 1:flow.Ncycles*flow.N
+    front = foil.N ÷ 2 
     for i in 1:flow.Ncycles*flow.N
         A, rhs, edge_body = make_infs(foil)
         le_inf, le_buff = ledge_inf(foil)
@@ -98,7 +100,7 @@ begin
         buff += le_buff * foil.μ_ledge[1]
         get_μ!(foil,  rhs, A, le_inf, buff, false)
         p = panel_pressure(foil, flow, old_mus, old_phis, phi)
-        if length(filter(x->x>3.0, p[3:5])) > 0
+        if length(filter(x-> x>1.0, p[front-1:front+1])) > 0
             get_μ!(foil,  rhs, A, le_inf, buff, true)
             p = panel_pressure(foil, flow, old_mus, old_phis, phi)
         else
@@ -108,11 +110,13 @@ begin
         # end    
         coeffs[:,i] = get_performance(foil, flow, p)
         
-               
+
         cancel_buffer_Γ!(wake, foil)
         body_to_wake!(wake, foil, flow)
         wake_self_vel!(wake, flow)  
-        # move_wake!(wake, flow)
+        # sdf_fence!(wake, foil, flow)    
+        move_wake!(wake,flow)          
+        # time_increment!(flow, foil, wake)         
         release_vortex!(wake, foil)
         (foil)(flow)
         #LEading edge is separate for now, rollin it into the main loop        
@@ -131,7 +135,6 @@ begin
         gif(anim, "LESP_1.gif", fps=30)  
     end
 end
-
 begin
     a1 = plot(pus, label="")
     b2 = plot(ps, label="")
@@ -207,16 +210,7 @@ function plot_ledge(foil::Foil, ledge)
     a
 end
 
-function set_ledge!(foil::Foil, flow::FlowParams)
-    front = foil.N ÷ 2 +1
-    le_norm = foil.normals[:,front+1]*flow.Uinf*flow.Δt
-    #initial the ledge
-    if flow.n ==1
-        foil.ledge = [foil.foil[:,front] foil.foil[:,front] .+ le_norm*0.4 foil.foil[:,front] .+ le_norm*1.4 ]
-    else
-        foil.ledge = [foil.foil[:,front] foil.foil[:,front] .+ le_norm*0.4 foil.ledge[:,2]]  
-    end
-end
+
 
 
 
