@@ -130,7 +130,7 @@ function time_increment!(flow::FlowParams, foils::Vector{Foil}, wake::Wake)
     old_mus = [μs'; old_mus[1:2,:]]
     old_phis = [phis'; old_phis[1:2,:]]
         
-    move_wake!(wake, flow)
+    # move_wake!(wake, flow)
     for foil in foils
         release_vortex!(wake, foil)
     end
