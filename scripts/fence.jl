@@ -1,8 +1,8 @@
 include("../src/BemRom.jl")
 using Plots
-using RegionTrees
-import RegionTrees: AbstractRefinery, needs_refinement, refine_data
-using IntervalSets
+# using RegionTrees
+# import RegionTrees: AbstractRefinery, needs_refinement, refine_data
+# using IntervalSets
 using Dierckx
 
 
@@ -135,7 +135,9 @@ end
 
 minsmax(foil) = map(x -> minimum(nfoil[1,:]) <= x <= maximum(nfoil[2,:]), dest[1,:])
 
-function sdf_fence!(wake::Wake, foil::Foil, flow::FlowParams)
+function sdf_fence(wake::Wake, foil::Foil, flow::FlowParams; dest = nothing)
+    # Estimate the final position of the vortices
+    dest = isnothing(dest) ? wake.xy + wake.uv * flow.Δt : dest
     # Calculate the next position of the foil
     nfoil = next_foil_pos(foil, flow)
     _ , N  = findmin(nfoil[1,:])
@@ -145,8 +147,7 @@ function sdf_fence!(wake::Wake, foil::Foil, flow::FlowParams)
     sdf = foilsdf(nfoil, foil.N, (top, bottom))
     # Define the mid plane between splines
     mid(x) = (top(x) + bottom(x)) / 2.0
-    # Estimate the final position of the vortices
-    dest = wake.xy + wake.uv * flow.Δt
+    
     # Define vortex motion as a line with slopes and intercepts
     ms = (dest[2, :] .- wake.xy[2, :]) ./ (dest[1, :] .- wake.xy[1, :])
     bs = ms .* dest[1, :] .- dest[2, :]
@@ -156,6 +157,7 @@ function sdf_fence!(wake::Wake, foil::Foil, flow::FlowParams)
     
     # Start the looping process, using a quadtree to reduce the computational load
     iters = 1
+    
     while sum(inside) > 0 && iters < 10
         for i in findall(x -> x == 2, inside)
             flip = 1  # Variable to flip the direction of the tangent vortex
@@ -211,8 +213,22 @@ function sdf_fence!(wake::Wake, foil::Foil, flow::FlowParams)
        
         end
     end
-    wake.xy = dest
-    nothing
+    @assert count(x-> x ==2, inside) == 0 
+    dest    
+end
+
+"""
+    sdf_fence(wake::Wake, foils::Vector,flow::FlowParams;dest=nothing, mask=nothing)
+
+    mask -> bit mask defaults to all foils get a fence, can select which get fences
+"""
+function sdf_fence(wake::Wake, foils::Vector, flow::FlowParams; mask=nothing) 
+    dest =  wake.xy + wake.uv * flow.Δt    
+    mask = isnothing(mask) ? ones(Bool, length(foils)) : mask
+    for i in findall(mask)
+        dest = sdf_fence(wake, foils[i], flow; dest=dest)              
+    end
+    dest
 end
 
 
