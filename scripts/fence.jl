@@ -1,9 +1,523 @@
 include("../src/BemRom.jl")
 using Plots
-using RegionTrees
-import RegionTrees: AbstractRefinery, needs_refinement, refine_data
-using IntervalSets
+# using RegionTrees
+# import RegionTrees: AbstractRefinery, needs_refinement, refine_data
+# using IntervalSets
+using Dierckx
 
+
+function make_splines(foil, N)
+    top = Spline1D(foil[1,N÷2 + 1:end], foil[2,N÷2+1:end])   
+    bottom = Spline1D(foil[1,N÷2+1:-1:1], foil[2,N÷2+1:-1:1])
+    top,bottom 
+end
+
+function make_splines(foil)
+    # assumes traveling to the left
+    _ , N  = findmin(foil[1,:])
+    top    = Spline1D(foil[1,N:end],  foil[2,N:end])   
+    bottom = Spline1D(foil[1,N:-1:1], foil[2,N:-1:1])
+    top,bottom 
+end
+
+make_splines(foil::Foil) = make_splines(foil.foil)
+
+
+function foilsdf(foil::Foil)
+    #make splines
+    top, bottom = make_splines(foil)
+    """
+    isinside(xy)
+    xy is a pair to test if inside of the splines constructed
+    should allow for passing of vectors via 
+    
+    """
+    function isinside(xy)
+        #make a range of acceptable xs        
+        if minimum(foil.foil[1,:]) <= xy[1] <= maximum(foil.foil[1,:])
+            #find the smallest distance in y if accX is true
+            thetop = top(xy[1])
+            thebot = bottom(xy[1])
+            mid = (thetop + thebot)./2.0
+            if xy[2] <= mid
+                return thebot  - xy[2] 
+            else
+                return xy[2] .- thetop
+            end
+        else 
+            return 0.0
+        end
+    end
+end
+
+function foilsdf(foil::Foil, splines)
+    #make splines
+    top, bottom = splines
+    """
+    isinside(xy)
+    xy is a pair to test if inside of the splines constructed
+    should allow for passing of vectors via 
+    
+    """
+    function isinside(xy)
+        #make a range of acceptable xs        
+        if minimum(foil.foil[1,:]) <= xy[1] <= maximum(foil.foil[1,:])
+            #find the smallest distance in y if accX is true
+            thetop = top(xy[1])
+            thebot = bottom(xy[1])
+            mid = (thetop + thebot)./2.0
+            if xy[2] <= mid
+                return thebot  - xy[2] 
+            else
+                return xy[2] .- thetop
+            end
+        else 
+            return 0.0
+        end
+    end
+end
+
+function foilsdf(nfoil, N, splines)
+    #make splines
+    top,bottom = splines
+    
+    """
+    isinside(xy)
+    xy is a pair to test if inside of the splines constructed
+    should allow for passing of vectors via 
+    
+    """
+    function isinside(xy)
+        #make a range of acceptable xs        
+        if minimum(nfoil[1,:]) <= xy[1] <= maximum(nfoil[1,:])
+            #find the smallest distance in y if accX is true
+            thetop = top(xy[1])
+            thebot = bottom(xy[1])
+            mid = (thetop + thebot)./2.0
+            if xy[2] <= mid
+                return thebot  - xy[2] 
+            else
+                return xy[2] .- thetop
+            end
+        else 
+            return 0.0
+        end
+    end
+end
+
+function foilsdf(nfoil, N)
+    #make splines
+    top,bottom =make_splines(nfoil,N)
+    
+    """
+    isinside(xy)
+    xy is a pair to test if inside of the splines constructed
+    should allow for passing of vectors via 
+    
+    """
+    function isinside(xy)
+        #make a range of acceptable xs        
+        if minimum(nfoil[1,:]) <= xy[1] <= maximum(nfoil[1,:])
+            #find the smallest distance in y if accX is true
+            thetop = top(xy[1])
+            thebot = bottom(xy[1])
+            mid = (thetop + thebot)./2.0
+            if xy[2] <= mid
+                return thebot  - xy[2] 
+            else
+                return xy[2] .- thetop
+            end
+        else 
+            return 0.0
+        end
+    end
+end
+
+minsmax(foil) = map(x -> minimum(nfoil[1,:]) <= x <= maximum(nfoil[2,:]), dest[1,:])
+
+function sdf_fence(wake::Wake, foil::Foil, flow::FlowParams; dest = nothing)
+    # Estimate the final position of the vortices
+    dest = isnothing(dest) ? wake.xy + wake.uv * flow.Δt : dest
+    # Calculate the next position of the foil
+    nfoil = next_foil_pos(foil, flow)
+    _ , N  = findmin(nfoil[1,:])
+    # Generate splines for the top and bottom paths of the foil
+    top, bottom = make_splines(nfoil)
+    # Construct signed distance functions (SDFs) for the foil
+    sdf = foilsdf(nfoil, foil.N, (top, bottom))
+    # Define the mid plane between splines
+    mid(x) = (top(x) + bottom(x)) / 2.0
+    
+    # Define vortex motion as a line with slopes and intercepts
+    ms = (dest[2, :] .- wake.xy[2, :]) ./ (dest[1, :] .- wake.xy[1, :])
+    bs = ms .* dest[1, :] .- dest[2, :]
+    # Check if the final position is inside the foil
+    xinside = map(x -> minimum(nfoil[1,:]) <= x <= maximum(nfoil[1,:]), dest[1,:])
+    inside = xinside + [sdf(dest[:, i]) for i in 1:size(dest)[2]] .< 0
+    
+    # Start the looping process, using a quadtree to reduce the computational load
+    iters = 1
+    
+    while sum(inside) > 0 && iters < 10
+        for i in findall(x -> x == 2, inside)
+            flip = 1  # Variable to flip the direction of the tangent vortex
+            # Check if the vortex is on the top or bottom of the foil
+            if dest[2, i] >= mid(wake.xy[1, i])
+                # Construct the spline path for the top of the foil
+                tPath = Spline1D(nfoil[1, N+1:end], nfoil[2, N+1:end] - ms[i] .* nfoil[1, N+1:end] .+ bs[i])
+                if wake.xy[1, i] < dest[1, i]
+                    xint = filter(x -> wake.xy[1, i] <= x <= dest[1, i], roots(tPath))
+                else
+                    xint = filter(x -> wake.xy[1, i] >= x >= dest[1, i], roots(tPath))
+                    flip = -1
+                end
+                # Check if there is an intersection point between the vortex and the foil
+                if !isempty(xint)
+                    yint = top(xint)
+                    whichPanel = findlast(xint .>= nfoil[1, N+1:end]) + N
+                else
+                    whichPanel = findlast(dest[1, i] .>= nfoil[1, N:end]) + N
+                end
+            else
+                # Construct the spline path for the bottom of the foil
+                bPath = Spline1D(nfoil[1, N+1:-1:1], nfoil[2, N+1:-1:1] - ms[i] .* nfoil[1, N+1:end] .+ bs[i])
+                if wake.xy[1, i] < dest[1, i]
+                    xint = filter(x -> wake.xy[1, i] <= x <= dest[1, i], roots(bPath))                    
+                else
+                    xint = filter(x -> wake.xy[1, i] >= x >= dest[1, i], roots(bPath))
+                    flip = -1
+                end
+                if !isempty(xint)
+                    yint = bottom(xint)
+                    whichPanel = findfirst(xint .>= nfoil[1, 1:N + 1]) - 1
+                else
+                    whichPanel = findfirst(dest[1, i] .>= nfoil[1, 1:N + 1]) - 1
+                end
+            end
+            # Update the motion of the vortex based on the intersection with the foil
+            if !isempty(xint)
+                #make all tangents direct to TE
+                tangents = [-foil.tangents[:,1:foil.N÷2] foil.tangents[:,foil.N÷2+1:end]]
+                leg1 = [xint..., yint...] .- wake.xy[:, i] .+ flow.δ / 2.0 .* foil.normals[:, whichPanel]
+                leg2 = dest[:, i] .- [xint..., yint...] .+ flow.δ / 2.0 .* foil.normals[:, whichPanel]
+                mag = norm(leg2) * flip
+                fin = [xint..., yint...] + mag .* tangents[:, whichPanel] .+ flow.δ / 2.0 .* foil.normals[:, whichPanel]
+            # If the vortex is outside the last foil but within the next time step, move it according to the local panel's motion
+            elseif sdf(dest[:, i]) < 0.0
+                fin = dest[:, i] + nfoil[:, whichPanel] - foil.foil[:, whichPanel] .+ flow.δ / 2.0 .* foil.normals[:, whichPanel]
+            end
+            dest[:, i] = fin
+            inside = [sdf(dest[:, i]) for i in 1:size(dest)[2]] .< 0
+            inside += map(x -> minimum(nfoil[1,:]) <= x <= maximum(nfoil[1,:]), dest[1,:])
+            iters += 1
+       
+        end
+    end
+    @assert count(x-> x ==2, inside) == 0 
+    dest    
+end
+
+"""
+    sdf_fence(wake::Wake, foils::Vector,flow::FlowParams;dest=nothing, mask=nothing)
+
+    mask -> bit mask defaults to all foils get a fence, can select which get fences
+"""
+function sdf_fence(wake::Wake, foils::Vector, flow::FlowParams; mask=nothing) 
+    dest =  wake.xy + wake.uv * flow.Δt    
+    mask = isnothing(mask) ? ones(Bool, length(foils)) : mask
+    for i in findall(mask)
+        dest = sdf_fence(wake, foils[i], flow; dest=dest)              
+    end
+    dest
+end
+
+
+begin
+    foils = [(foil.foil[1,:].+1.5)... foil.foil[1,:]...;
+             foil.foil[2,:]...   foil.foil[2,:]...]
+    plot(foils[1,:], foils[2,:])
+end
+
+begin
+    heave_pitch = deepcopy(defaultDict)
+    heave_pitch[:N] = 64
+    heave_pitch[:Nt] = 64
+    heave_pitch[:Ncycles] = 1
+    heave_pitch[:f] = 2.0
+    heave_pitch[:Uinf] = 1.0
+    heave_pitch[:kine] = :make_heave_pitch
+    θ0 = deg2rad(1)
+    h0 = 0.01
+    heave_pitch[:motion_parameters] = [h0, θ0]
+    foil, flow = init_params(;heave_pitch...)
+    wake = Wake(foil)
+    (foil)(flow)
+    
+     for i in 1:flow.Ncycles*flow.N*2
+        time_increment!(flow, foil, wake)   
+        dest = wake.xy + wake.uv .* flow.Δt
+                         
+    end
+    #We only care if the vortex ends up inside of the foil after motion
+    nfoil = next_foil_pos(foil, flow)
+    a = plot_current(foil,wake)
+    wake.xy .-= [2, 0.0]    
+    a = plot_current(foil,wake)
+end
+
+begin
+    @show flow.n
+    movie = @animate for i in 1:flow.N*3       
+        dest = sdf_fence!(wake, foil, flow)
+        wake.xy = dest     
+        time_increment!(flow, foil, wake)          
+        a = plot_current(foil,wake)
+        a
+    end
+    gif(movie, "fence.gif")
+end
+
+
+begin
+    @show flow.n
+    movie = @animate for i in 1:flow.N*3
+        #for the next time step
+        nfoil = next_foil_pos(foil, flow)
+        #make splines
+        topcurr, bottomcurr = make_splines(foil)
+        top, bottom = make_splines(nfoil,foil.N)
+        # construct SDFs
+        sdfcurr = foilsdf(foil, (topcurr, bottomcurr))                
+        sdf = foilsdf(nfoil, foil.N, (top, bottom))
+
+        # define the neutral axis        
+        mid(x) = (top(x)+bottom(x))/2.0
+        #initial guess at where vortices final position
+        dest = wake.xy + wake.uv*flow.Δt
+
+        #define vortex motion as line; slopes and intercepts
+        ms = (dest[2,:] .- wake.xy[2,:]) ./(dest[1,:] .- wake.xy[1,:])
+        bs = ms.*dest[1,:] - dest[2,:]
+        
+        inside = [sdf(dest[:,i]) for i in 1:size(dest)[2]] .< 0 
+        insidecur = sum([sdfcurr(wake.xy[:,i]) for i in 1:size(dest)[2]] .< 0 )
+               
+        #start looping -> quadtree will reduce this load 
+        # top and bottom paths for root finding
+        iters = 1
+        while sum(inside)>0 & iters < 10
+            for i in findall(x-> x ==1, inside)                                
+                # flip the tangent vortex is traveling to the left (-x dir)
+                flip = 1
+                #top of foil
+                if dest[2,i] >= mid(wake.xy[1,i]) 
+                    tPath = Spline1D(nfoil[1,foil.N÷2 + 1:end], nfoil[2,foil.N÷2+1:end]  - ms[i].*nfoil[1,foil.N÷2 + 1:end] .+ bs[i])
+                    if wake.xy[1,i] < dest[1,i]
+                        xint =  filter(x-> wake.xy[1,i] <= x <= dest[1,i], roots(tPath))
+                    else
+                        xint =  filter(x-> wake.xy[1,i] >= x >= dest[1,i], roots(tPath))
+                        flip = -1
+                    end
+                    #make sure that there is an intercept, might be pancaked between time-steps
+                    if !isempty(xint)
+                        yint = top(xint)
+                        whichPanel = findlast(xint .>= nfoil[1,foil.N÷2+1:end]) + foil.N÷2
+                        # print("Intersection $(xint), $(yint)")
+                    else
+                        whichPanel = findlast(dest[1,i] .>=nfoil[1,foil.N÷2+1:end]) + foil.N÷2 
+                    end
+                else #bottom of the foil
+                    bPath = Spline1D(nfoil[1,foil.N÷2+1:-1:1],  nfoil[2,foil.N÷2+1:-1:1] - ms[i].*nfoil[1,foil.N÷2 + 1:end] .+ bs[i])                
+                    if wake.xy[1,i] < dest[1,i]
+                        xint = filter(x-> wake.xy[1,i]<= x <= dest[1,i], roots(bPath))
+                        flip = -1
+                    else
+                        xint = filter(x-> wake.xy[1,i]>= x >= dest[1,i], roots(bPath))
+                    end                
+                    if !isempty(xint)
+                        yint = bottom(xint)
+                        whichPanel = findfirst(xint .>= nfoil[1,1:foil.N÷2+1])-1
+                        # print("Intersection $(xint), $(yint)")
+                    else
+                        whichPanel = findfirst(dest[1,i] .>= nfoil[1,1:foil.N÷2+1])-1
+                    end
+                end
+                #intersection with nfoil, adjust motion
+                if !isempty(xint)
+                    leg1 = [xint..., yint...] .- wake.xy[:,i] .+ flow.δ/2.0 .*foil.normals[:,whichPanel] 
+                    leg2 = dest[:,i] .- [xint..., yint...] .+ flow.δ/2.0 .*foil.normals[:,whichPanel]
+                    mag = norm(leg2)*flip 
+                    #if on the top and moves right to left <- flip sign or if on bottom and moves left to right flip sign
+                    fin = [xint..., yint...] + mag.*foil.tangents[:,whichPanel] .+ flow.δ/2.0 .*foil.normals[:,whichPanel]
+                    # println("ends up at $(fin) ")
+                # pancaked - outside the last foil but travels within the next time step ->
+                # move it how much the local panel has moved
+                # elseif sdf(wake.xy[:,i])<0.0 
+                elseif sdf(dest[:,i])<0.0 
+                    fin = dest[:,i] + nfoil[:,whichPanel] - foil.foil[:,whichPanel] .+ flow.δ/2.0 .*foil.normals[:,whichPanel]
+
+                end
+                dest[:,i] = fin 
+                inside = [sdf(dest[:,i]) for i in 1:size(dest)[2]] .< 0 
+                iters +=1
+            end
+            @show iters
+            # no vortices are allowed inside of the foil after motion
+            @assert sum(inside) == 0
+        end        
+        a = plot_current(foil,wake) 
+
+            
+        wake.xy = dest     
+        time_increment!(flow, foil, wake)  
+        # end
+
+    
+        plot!(a, dest[1,:], dest[2,:], st=:scatter, ms = 1)    
+        plot!(nfoil[1,:],nfoil[2,:],size=(1000,800))
+        # plot!(xlims=(-0.45,-0.4),ylims=(-0.025,0.125))     
+        a
+    end
+    gif(movie, "fence.gif")
+end
+
+
+begin
+    plot(nfoil[1,:], top.(nfoil[1,:]))
+    plot!(nfoil[1,:], bottom.(nfoil[1,:]))
+    plot!(foil.foil[1,:], topcurr.(foil.foil[1,:]))
+    plot!(foil.foil[1,:], bottomcurr.(foil.foil[1,:]))
+    @show sdf(dest[:,13])
+    plot!([dest[1,13]],[dest[2,13]],st=:scatter)
+
+end
+
+begin 
+    tangents = [-foil.tangents[:,1:foil.N÷2] foil.tangents[:,foil.N÷2+1:end]]
+    # quiver(foil.foil[1,1:32],foil.foil[2,1:32], quiver=(-foil.tangents[1,1:32],-foil.tangents[2,1:32]))
+    # quiver!(foil.foil[1,32:end],foil.foil[2,32:end], quiver=(foil.tangents[1,32:end],foil.tangents[2,32:end]))
+    quiver(foil.foil[1,:],foil.foil[2,:], quiver=(tangents[1,:], tangents[2,:]), label="new")
+end
+
+
+
+findall(in(right), left )
+plot!(x, top(x) )
+plot!(x, bottom(x) )
+plot!(x, (top(x) + bottom(x))./2.0)
+
+plot([sdf(wake.xy[:,i]) for i in 1:size(wake.xy)[2]])
+plot!([xy[1]], [mid], st=:scatter)
+
+
+x = -1.1:0.01:0
+plot(x,top.(x))
+plot!(x,bottom.(x), aspect_ratio = :equal)
+
+xp,yp = -1.5, 0.05
+top(xp)
+plot!([xp], [yp], st=:scatter)
+
+
+#make a range of acceptable xs
+accX(x) = minimum(foil.foil[1,:])<= x <= maximum(foil.foil[1,:])
+
+accX(xp)
+
+
+
+top(1)
+plot(top.(wake.xy[1,:]) + top.(dest[1,:]))
+plot!(bottom.(wake.xy[1,:]) - bottom.(dest[1,:]))
+plot(wake.xy[1,:], wake.xy[2,:], st=:scatter, color=:blue)
+plot!(dest[1,:], dest[2,:], st=:scatter, color=:red)
+plot!(foil.foil[1,:],foil.foil[2,:], aspect_ratio=:equal)
+dest[2,:]
+begin
+    strt = [-0.85, 0.125]     
+    stp  = [-0.75, -0.05]
+    #define the line for vortex motion
+    m = (stp[2] - strt[2]) /(stp[1]-strt[1])
+    b = m*stp[1] - stp[2]
+    # top and bottom paths for root finding
+    tPath = Spline1D(foil.foil[1,foil.N÷2 + 1:end], foil.foil[2,foil.N÷2+1:end] - m.*foil.foil[1,foil.N÷2 + 1:end].+ b)
+    bPath = Spline1D(foil.foil[1,foil.N÷2+1:-1:1], foil.foil[2,foil.N÷2+1:-1:1] - m.*foil.foil[1,foil.N÷2 + 1:end].+ b)
+    #mid plane
+    mid = (top.(foil.foil[1,foil.N÷2 + 1:end]) + bottom(foil.foil[1,foil.N÷2 + 1:end])) ./ 2.0
+    midd(x) = (top(x)+bottom(x))/2.0
+    #filter to ensure its on the particle path
+    flip = 1
+    if strt[2] >= midd(strt[1]) 
+        if strt[1] < stp[1]
+            xint =  filter(x-> strt[1]<= x <= stp[1], roots(tPath))
+        else
+            xint =  filter(x-> strt[1]>= x >= stp[1], roots(tPath))
+            flip = -1
+        end
+        yint = top(xint)
+        whichPanel = findlast(xint .>=foil.foil[1,foil.N÷2+1:end])+foil.N÷2
+    else
+        if strt[1] < stp[1]
+            xint = filter(x-> strt[1]<= x <= stp[1], roots(bPath))
+            flip = -1
+        else
+            xint = filter(x-> strt[1]>= x >= stp[1], roots(bPath))
+        end
+        yint = bottom(xint)
+        whichPanel = findfirst(xint .>= foil.foil[1,1:foil.N÷2+1])-1
+    end
+    a = plot(pos[1,:], pos[2,:], aspect_ratio=:equal,label="")
+    plot!(foil.foil[1,foil.N÷2 + 1:end], mid,label="")
+    plot!([strt[1], stp[1]], [strt[2], stp[2]],label="")
+    plot!([xint], [yint],st=:scatter, label="intercept")
+    plot!([foil.foil[1,whichPanel:whichPan+1]], [foil.foil[2,whichPanel:whichPan+1]],st=:scatter,label="Panel Ends")
+    
+    leg1 = [xint..., yint...] .+ flow.δ/2.0 .*foil.normals[:,whichPanel] .- strt
+    leg2 = stp .- [xint..., yint...] .+ flow.δ/2.0 .*foil.normals[:,whichPanel]
+    mag = norm(leg2)*flip 
+
+    #if on the top and moves right to left <- flip sign or if on bottom and moves left to right flip sign
+
+    fin = mag.*foil.tangents[:,whichPanel]+[xint..., yint...] .+ flow.δ/2.0 .*foil.normals[:,whichPanel]
+
+    plot!(a,[xint fin[1]]', [yint fin[2]]', marker=:star, label="final",size=(1000,800))
+    
+    # quiver!(a, foil.foil[1,whichPanel:whichPan+1],foil.foil[2,whichPanel:whichPan+1], 
+    # quiver=(foil.tangents[1,whichPanel:whichPan+1],foil.tangents[2,whichPanel:whichPan+1]))
+    a
+end
+
+
+function compute_signed_distance(x, y)
+    t_c = 0.12
+    m = 0  # Camber line for symmetric airfoil
+
+    # Maximum thickness distribution (z_t) function
+    function z_t(x)
+        return (0.12/0.2) * (0.2969 * sqrt(x) - 0.1260 * x - 0.3516 * x^2 + 0.2843 * x^3 - 0.1015 * x^4)
+    end
+
+    # Compute Euclidean distance to camber line
+    d_e = abs(y - m)
+
+    # Compute thickness distribution
+    d_t = z_t(x)
+
+    # Compute signed distance
+    d = y >= m ? y - m - d_t : - m + d_t
+
+    return d
+end
+
+# Example usage
+x = 0.5  # x-coordinate of the point
+y = 0.01  # y-coordinate of the point
+signed_distance = compute_signed_distance(x, y)
+println("Signed distance:", signed_distance)
+
+X = -2:0.1:2 
+Y = deepcopy(X)
+contourf(X,Y,compute_signed_distance.(X,Y))
 
 heave_pitch = deepcopy(defaultDict)
 heave_pitch[:N] = 64
@@ -333,355 +847,3 @@ begin
 end
 
 
-
-using Dierckx
-dest = wake.xy .- [0.0, 0.05]
-
-function make_splines(foil::Foil)
-    top = Spline1D(foil.foil[1,foil.N÷2 + 1:end], foil.foil[2,foil.N÷2+1:end])
-    bottom = Spline1D(foil.foil[1,foil.N÷2+1:-1:1], foil.foil[2,foil.N÷2+1:-1:1])
-    top,bottom 
-end
-
-function make_splines(foil, N)
-    top = Spline1D(foil[1,N÷2 + 1:end], foil[2,N÷2+1:end])
-    bottom = Spline1D(foil[1,N÷2+1:-1:1], foil[2,N÷2+1:-1:1])
-    top,bottom 
-end
-
-function foilsdf(foil::Foil)
-    #make splines
-    top, bottom = make_splines(foil)
-    """
-    isinside(xy)
-    xy is a pair to test if inside of the splines constructed
-    should allow for passing of vectors via 
-    
-    """
-    function isinside(xy)
-        #make a range of acceptable xs        
-        if minimum(foil.foil[1,:]) <= xy[1] <= maximum(foil.foil[1,:])
-            #find the smallest distance in y if accX is true
-            thetop = top(xy[1])
-            thebot = bottom(xy[1])
-            mid = (thetop + thebot)./2.0
-            if xy[2] <= mid
-                return thebot  - xy[2] 
-            else
-                return xy[2] .- thetop
-            end
-        else 
-            return 0.0
-        end
-    end
-end
-function foilsdf(nfoil, N)
-    #make splines
-    top,bottom =make_splines(nfoil,N)
-    
-    """
-    isinside(xy)
-    xy is a pair to test if inside of the splines constructed
-    should allow for passing of vectors via 
-    
-    """
-    function isinside(xy)
-        #make a range of acceptable xs        
-        if minimum(nfoil[1,:]) <= xy[1] <= maximum(nfoil[1,:])
-            #find the smallest distance in y if accX is true
-            thetop = top(xy[1])
-            thebot = bottom(xy[1])
-            mid = (thetop + thebot)./2.0
-            if xy[2] <= mid
-                return thebot  - xy[2] 
-            else
-                return xy[2] .- thetop
-            end
-        else 
-            return 0.0
-        end
-    end
-end
-
-begin
-    sdf = foilsdf(foil)
-    inside = [sdf(parts[:,i]) for i in 1:size(parts)[2]] .< 0 
-
-    plot(pos[1,:], pos[2,:], aspect_ratio=:equal)
-    plot!(parts[1,:], parts[2,:], st=:scatter)
-    plot!(parts[1,inside], parts[2,inside], st=:scatter)
-end
-
-
-begin
-    strt = [-0.85, 0.125]     
-    stp  = [-0.75, -0.05]
-    #define the line for vortex motion
-    m = (stp[2] - strt[2]) /(stp[1]-strt[1])
-    b = m*stp[1] - stp[2]
-    # top and bottom paths for root finding
-    tPath = Spline1D(foil.foil[1,foil.N÷2 + 1:end], foil.foil[2,foil.N÷2+1:end] - m.*foil.foil[1,foil.N÷2 + 1:end].+ b)
-    bPath = Spline1D(foil.foil[1,foil.N÷2+1:-1:1], foil.foil[2,foil.N÷2+1:-1:1] - m.*foil.foil[1,foil.N÷2 + 1:end].+ b)
-    #mid plane
-    mid = (top.(foil.foil[1,foil.N÷2 + 1:end]) + bottom(foil.foil[1,foil.N÷2 + 1:end])) ./ 2.0
-    midd(x) = (top(x)+bottom(x))/2.0
-    #filter to ensure its on the particle path
-    flip = 1
-    if strt[2] >= midd(strt[1]) 
-        if strt[1] < stp[1]
-            xint =  filter(x-> strt[1]<= x <= stp[1], roots(tPath))
-        else
-            xint =  filter(x-> strt[1]>= x >= stp[1], roots(tPath))
-            flip = -1
-        end
-        yint = top(xint)
-        whichPanel = findlast(xint .>=foil.foil[1,foil.N÷2+1:end])+foil.N÷2
-    else
-        if strt[1] < stp[1]
-            xint = filter(x-> strt[1]<= x <= stp[1], roots(bPath))
-            flip = -1
-        else
-            xint = filter(x-> strt[1]>= x >= stp[1], roots(bPath))
-        end
-        yint = bottom(xint)
-        whichPanel = findfirst(xint .>= foil.foil[1,1:foil.N÷2+1])-1
-    end
-    a = plot(pos[1,:], pos[2,:], aspect_ratio=:equal,label="")
-    plot!(foil.foil[1,foil.N÷2 + 1:end], mid,label="")
-    plot!([strt[1], stp[1]], [strt[2], stp[2]],label="")
-    plot!([xint], [yint],st=:scatter, label="intercept")
-    plot!([foil.foil[1,whichPanel:whichPan+1]], [foil.foil[2,whichPanel:whichPan+1]],st=:scatter,label="Panel Ends")
-    
-    leg1 = [xint..., yint...] .+ flow.δ/2.0 .*foil.normals[:,whichPanel] .- strt
-    leg2 = stp .- [xint..., yint...] .+ flow.δ/2.0 .*foil.normals[:,whichPanel]
-    mag = norm(leg2)*flip 
-
-    #if on the top and moves right to left <- flip sign or if on bottom and moves left to right flip sign
-
-    fin = mag.*foil.tangents[:,whichPanel]+[xint..., yint...] .+ flow.δ/2.0 .*foil.normals[:,whichPanel]
-
-    plot!(a,[xint fin[1]]', [yint fin[2]]', marker=:star, label="final",size=(1000,800))
-    
-    # quiver!(a, foil.foil[1,whichPanel:whichPan+1],foil.foil[2,whichPanel:whichPan+1], 
-    # quiver=(foil.tangents[1,whichPanel:whichPan+1],foil.tangents[2,whichPanel:whichPan+1]))
-    a
-end
-
-begin
-    heave_pitch = deepcopy(defaultDict)
-    heave_pitch[:N] = 64
-    heave_pitch[:Nt] = 64
-    heave_pitch[:Ncycles] = 1
-    heave_pitch[:f] = 1.0
-    heave_pitch[:Uinf] = 1.0
-    heave_pitch[:kine] = :make_heave_pitch
-    θ0 = deg2rad(5)
-    h0 = 0.0
-    heave_pitch[:motion_parameters] = [h0, θ0]
-    foil, flow = init_params(;heave_pitch...)
-    wake = Wake(foil)
-    (foil)(flow)
-    
-     for i in 1:flow.Ncycles*flow.N*1
-        time_increment!(flow, foil, wake)   
-        dest = wake.xy + wake.uv .* flow.Δt
-                         
-    end
-    #We only care if the vortex ends up inside of the foil after motion
-    nfoil = next_foil_pos(foil, flow)
-    a = plot_current(foil,wake)
-    wake.xy .-= [2, 0.0]
-    a = plot_current(foil,wake)
-end
-
-begin
-    @show flow.n
-    movie = @animate for i in 1:flow.N*2
-        #for the next time step
-        sdfcurr = foilsdf(foil)
-        #We only care if the vortex ends up inside of the foil after motion
-        nfoil = next_foil_pos(foil, flow)
-        sdf = foilsdf(nfoil, foil.N)
-        topcurr, bottomcurr = make_splines(foil)
-        top, bottom = make_splines(nfoil,foil.N)
-        mid = (top.(foil.foil[1,foil.N÷2 + 1:end]) + bottom(foil.foil[1,foil.N÷2 + 1:end])) ./ 2.0
-        midd(x) = (top(x)+bottom(x))/2.0
-        # refactoring of the start/stop code to workwith wake and dest vector
-        dest = wake.xy + wake.uv*flow.Δt
-        #define the line for vortex motion; slopes and intercepts
-        ms = (dest[2,:] .- wake.xy[2,:]) ./(dest[1,:] .- wake.xy[1,:])
-        bs = ms.*dest[1,:] - dest[2,:]
-        
-        inside = [sdf(dest[:,i]) for i in 1:size(dest)[2]] .< 0 
-        insidecur = sum([sdfcurr(wake.xy[:,i]) for i in 1:size(dest)[2]] .< 0 )
-        # @show sum([sdfcurr(wake.xy[:,i]) for i in 1:size(dest)[2]] .< 0 ) 
-        # @show sum([sdfcurr(dest[:,i]) for i in 1:size(dest)[2]] .< 0 )
-        # @show sum([sdf(wake.xy[:,i]) for i in 1:size(dest)[2]] .< 0 )
-        # @show sum([sdf(dest[:,i]) for i in 1:size(dest)[2]] .< 0 )
-        
-        #start looping -> quadtree will reduce this load 
-        # top and bottom paths for root finding
-        iters = 1
-        while sum(inside)>0 & iters < 10
-            for i in findall(x-> x ==1, inside)
-
-                #splines for finding intersection points, based on current particle path (top and bottom)
-                tPath = Spline1D(nfoil[1,foil.N÷2 + 1:end], nfoil[2,foil.N÷2+1:end]  - ms[i].*nfoil[1,foil.N÷2 + 1:end] .+ bs[i])
-                bPath = Spline1D(nfoil[1,foil.N÷2+1:-1:1],  nfoil[2,foil.N÷2+1:-1:1] - ms[i].*nfoil[1,foil.N÷2 + 1:end] .+ bs[i])
-                
-                #filter to ensure its on the particle path
-                flip = 1
-                #top of foil
-                if dest[2,i] >= midd(wake.xy[1,i]) 
-                    if wake.xy[1,i] < dest[1,i]
-                        xint =  filter(x-> wake.xy[1,i] <= x <= dest[1,i], roots(tPath))
-                    else
-                        xint =  filter(x-> wake.xy[1,i] >= x >= dest[1,i], roots(tPath))
-                        flip = -1
-                    end
-                    #make sure that there is an intercept, might be pancaked between time-steps
-                    if !isempty(xint)
-                        yint = top(xint)
-                        whichPanel = findlast(xint .>= nfoil[1,foil.N÷2+1:end]) + foil.N÷2
-                        # print("Intersection $(xint), $(yint)")
-                    else
-                        whichPanel = findlast(dest[1,i] .>=nfoil[1,foil.N÷2+1:end]) + foil.N÷2 
-                    end
-                else #bottom of the foil
-                    if wake.xy[1,i] < dest[1,i]
-                        xint = filter(x-> wake.xy[1,i]<= x <= dest[1,i], roots(bPath))
-                        flip = -1
-                    else
-                        xint = filter(x-> wake.xy[1,i]>= x >= dest[1,i], roots(bPath))
-                    end                
-                    if !isempty(xint)
-                        yint = bottom(xint)
-                        whichPanel = findfirst(xint .>= nfoil[1,1:foil.N÷2+1])-1
-                        # print("Intersection $(xint), $(yint)")
-                    else
-                        whichPanel = findfirst(dest[1,i] .>= nfoil[1,1:foil.N÷2+1])-1
-                    end
-                end
-                #intersection with nfoil, adjust motion
-                if !isempty(xint)
-                    leg1 = [xint..., yint...] .- wake.xy[:,i] .+ flow.δ/2.0 .*foil.normals[:,whichPanel] 
-                    leg2 = dest[:,i] .- [xint..., yint...] .+ flow.δ/2.0 .*foil.normals[:,whichPanel]
-                    mag = norm(leg2)*flip 
-                    #if on the top and moves right to left <- flip sign or if on bottom and moves left to right flip sign
-                    fin = [xint..., yint...] + mag.*foil.tangents[:,whichPanel] .+ flow.δ/2.0 .*foil.normals[:,whichPanel]
-                    # println("ends up at $(fin) ")
-                # pancaked - outside the last foil but travels within the next time step ->
-                # move it how much the local panel has moved
-                # elseif sdf(wake.xy[:,i])<0.0 
-                elseif sdf(dest[:,i])<0.0 
-                    fin = dest[:,i] + nfoil[:,whichPanel] - foil.foil[:,whichPanel] .+ flow.δ/2.0 .*foil.normals[:,whichPanel]
-                    # println("Pancake $(fin) ")
-                    # @show nfoil[:,whichPanel] - foil.foil[:,whichPanel]
-                    # plot!([nfoil[1,whichPanel:whichPanel+1]], [nfoil[2,whichPanel:whichPanel+1]],st=:scatter,label="Panel Ends")
-                    # plot!([dest[1,i]], [dest[2,i]],st=:scatter, ms = 2)
-                    # plot!([fin[1]], [fin[2]],st=:scatter, ms = 2)
-                end
-                dest[:,i] = fin 
-                inside = [sdf(dest[:,i]) for i in 1:size(dest)[2]] .< 0 
-                iters +=1
-            end
-            @assert sum(inside) == 0
-        end
-        dest 
-        a = plot_current(foil,wake) 
-        # if flow.n <47
-            
-            wake.xy = dest 
-    
-            time_increment!(flow, foil, wake)  
-        # end
-
-    
-        plot!(a, dest[1,:], dest[2,:], st=:scatter, ms = 1)    
-        plot!(nfoil[1,:],nfoil[2,:],size=(1000,800))
-        # plot!(xlims=(-0.45,-0.4),ylims=(-0.025,0.125))     
-        a
-    end
-    gif(movie, "fence.gif")
-end
-
-
-begin
-    plot(nfoil[1,:], top.(nfoil[1,:]))
-    plot!(nfoil[1,:], bottom.(nfoil[1,:]))
-    plot!(foil.foil[1,:], topcurr.(foil.foil[1,:]))
-    plot!(foil.foil[1,:], bottomcurr.(foil.foil[1,:]))
-    @show sdf(dest[:,13])
-    plot!([dest[1,13]],[dest[2,13]],st=:scatter)
-
-end
-
-quiver(foil.foil[1,:],foil.foil[2,:], quiver=(foil.tangents[1,:],foil.tangents[2,:]))
-
-
-
-findall(in(right), left )
-plot!(x, top(x) )
-plot!(x, bottom(x) )
-plot!(x, (top(x) + bottom(x))./2.0)
-
-plot([sdf(wake.xy[:,i]) for i in 1:size(wake.xy)[2]])
-plot!([xy[1]], [mid], st=:scatter)
-
-
-x = -1.1:0.01:0
-plot(x,top.(x))
-plot!(x,bottom.(x), aspect_ratio = :equal)
-
-xp,yp = -1.5, 0.05
-top(xp)
-plot!([xp], [yp], st=:scatter)
-
-
-#make a range of acceptable xs
-accX(x) = minimum(foil.foil[1,:])<= x <= maximum(foil.foil[1,:])
-
-accX(xp)
-
-
-
-top(1)
-plot(top.(wake.xy[1,:]) + top.(dest[1,:]))
-plot!(bottom.(wake.xy[1,:]) - bottom.(dest[1,:]))
-plot(wake.xy[1,:], wake.xy[2,:], st=:scatter, color=:blue)
-plot!(dest[1,:], dest[2,:], st=:scatter, color=:red)
-plot!(foil.foil[1,:],foil.foil[2,:], aspect_ratio=:equal)
-dest[2,:]
-
-
-
-function compute_signed_distance(x, y)
-    t_c = 0.12
-    m = 0  # Camber line for symmetric airfoil
-
-    # Maximum thickness distribution (z_t) function
-    function z_t(x)
-        return (0.12/0.2) * (0.2969 * sqrt(x) - 0.1260 * x - 0.3516 * x^2 + 0.2843 * x^3 - 0.1015 * x^4)
-    end
-
-    # Compute Euclidean distance to camber line
-    d_e = abs(y - m)
-
-    # Compute thickness distribution
-    d_t = z_t(x)
-
-    # Compute signed distance
-    d = y >= m ? y - m - d_t : - m + d_t
-
-    return d
-end
-
-# Example usage
-x = 0.5  # x-coordinate of the point
-y = 0.01  # y-coordinate of the point
-signed_distance = compute_signed_distance(x, y)
-println("Signed distance:", signed_distance)
-
-X = -2:0.1:2 
-Y = deepcopy(X)
-contourf(X,Y,compute_signed_distance.(X,Y))

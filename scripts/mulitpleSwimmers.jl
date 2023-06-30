@@ -9,8 +9,10 @@ begin
     # copy the first foil
     foil2 = deepcopy(foil1)
     #alter the second foil - absolute position
-    foil2.foil[1,:] .+= 1.5*foil.chord
-    foil2.f *= -1
+    foil2.foil[1,:] .+= 1.5*foil1.chord
+    # foil2.f *= -1
+    foil2.Φ = pi/2
+    foil2.start = [minimum(foil2.foil[1,:]), 0.0]
     norms!(foil2)
     set_collocation!(foil2)
     move_edge!(foil2,flow)
@@ -21,6 +23,7 @@ begin
 
     flow.Ncycles = 5
     flow.N = 50
+    flow.Uinf = 2.0
 
 
     #wake init
@@ -36,61 +39,59 @@ begin
 end
 
 
-wake.Γ = [1.0; -1.0]
-movie = @animate for t  in 1:steps
-    f = plot_current(foils, wake)
-    do_kinematics!(foils,flow)
-end
-gif(movie, "justKine.gif", fps=30)
+begin
+    steps = flow.N * flow.Ncycles
 
-steps = flow.N * flow.Ncycles
-
-movie = @animate for t  in 1:steps
-    A, rhs, edge_body = make_infs(foils) #̌#CHECK
-    [setσ!(foil, flow) for foil in foils] #CHECK
-    σs = [] #CHECK
-    buff = []
-    for (i, foil) in enumerate(foils)
-        foil.wake_ind_vel = vortex_to_target(wake.xy, foil.col, wake.Γ, flow)
-        normal_wake_ind = sum(foil.wake_ind_vel .* foil.normals, dims=1)'
-        foil.σs -= normal_wake_ind[:]
-        push!(σs, foil.σs...)
-        push!(buff, (edge_body[:,i] * foil.μ_edge[1])...)    
-    end
-    μs =  A \ (-rhs*σs - buff)
-    for (i, foil) in enumerate(foils)
-        foil.μs = μs[(i-1)*foil.N+1:i*foil.N]
-    end
-    set_edge_strength!.(foils)
-    cancel_buffer_Γ!(wake, foils)
-    wake_self_vel!(wake, flow)
-    totalN   = sum(foil.N for foil in foils)
-    phis     = zeros(totalN)
-    ps       = zeros(totalN)
-    old_mus  = zeros(3, totalN)
-    old_phis = zeros(3, totalN)
-    coeffs   = zeros(length(foils), 4, steps)
-    for  (i, foil) in enumerate(foils)
-        body_to_wake!(wake, foil, flow)
-        phi =  get_phi(foil, wake)
-        phis[(i-1)*foils[i].N+1:i*foils[i].N] = phi
-        p  = panel_pressure(foil, flow, old_mus[:,(i-1)*foils[i].N+1:i*foils[i].N],
-                                                old_phis[:,(i-1)*foils[i].N+1:i*foils[i].N], phi)
-        ps[(i-1)*foils[i].N+1:i*foils[i].N] = p
-        coeffs[i, : , 1] .= get_performance(foil, flow, p)
-    end
-    old_mus = [μs'; old_mus[1:2,:]]
-    old_phis = [phis'; old_phis[1:2,:]]
+    movie = @animate for t  in 1:steps -11
+        A, rhs, edge_body = make_infs(foils) #̌#CHECK
+        [setσ!(foil, flow) for foil in foils] #CHECK
+        σs = [] #CHECK
+        buff = []
+        for (i, foil) in enumerate(foils)
+            foil.wake_ind_vel = vortex_to_target(wake.xy, foil.col, wake.Γ, flow)
+            normal_wake_ind = sum(foil.wake_ind_vel .* foil.normals, dims=1)'
+            foil.σs -= normal_wake_ind[:]
+            push!(σs, foil.σs...)
+            push!(buff, (edge_body[:,i] * foil.μ_edge[1])...)    
+        end
+        μs =  A \ (-rhs*σs - buff)
+        for (i, foil) in enumerate(foils)
+            foil.μs = μs[(i-1)*foil.N+1:i*foil.N]
+        end
+        set_edge_strength!.(foils)
+        cancel_buffer_Γ!(wake, foils)
+        wake_self_vel!(wake, flow)
+        totalN   = sum(foil.N for foil in foils)
+        phis     = zeros(totalN)
+        ps       = zeros(totalN)
+        old_mus  = zeros(3, totalN)
+        old_phis = zeros(3, totalN)
+        coeffs   = zeros(length(foils), 4, steps)
+        for  (i, foil) in enumerate(foils)
+            body_to_wake!(wake, foil, flow)
+            phi =  get_phi(foil, wake)
+            phis[(i-1)*foils[i].N+1:i*foils[i].N] = phi
+            p  = panel_pressure(foil, flow, old_mus[:,(i-1)*foils[i].N+1:i*foils[i].N],
+                                                    old_phis[:,(i-1)*foils[i].N+1:i*foils[i].N], phi)
+            ps[(i-1)*foils[i].N+1:i*foils[i].N] = p
+            coeffs[i, : , 1] .= get_performance(foil, flow, p)
+        end
+        old_mus = [μs'; old_mus[1:2,:]]
+        old_phis = [phis'; old_phis[1:2,:]]        
+        wake.xy =  sdf_fence(wake, foils, flow)              
         
-    move_wake!(wake, flow)
-    for foil in foils
-        release_vortex!(wake, foil)
+        # move_wake!(wake, flow)
+        for foil in foils
+            release_vortex!(wake, foil)
+        end
+        do_kinematics!(foils,flow)
+        f = plot_current(foils, wake; window= (minimum(foils[2].foil[1,:])-0.25,maximum(foils[2].foil[1,:])+0.5))
+        # f = plot_current(foils, wake)
+        # @show t
+        f
     end
-    do_kinematics!(foils,flow)
-    f = plot_current(foils, wake)
-    f
+    gif(movie, "multi.gif", fps=30)
 end
-gif(movie, "multi.gif", fps=30)
 
 
 function time_increment!(flow::FlowParams, foils::Vector{Foil}, wake::Wake)
@@ -130,7 +131,7 @@ function time_increment!(flow::FlowParams, foils::Vector{Foil}, wake::Wake)
     old_mus = [μs'; old_mus[1:2,:]]
     old_phis = [phis'; old_phis[1:2,:]]
         
-    move_wake!(wake, flow)
+    # move_wake!(wake, flow)
     for foil in foils
         release_vortex!(wake, foil)
     end
