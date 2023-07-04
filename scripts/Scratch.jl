@@ -1,4 +1,5 @@
 include("../src/BemRom.jl")
+
 using SpecialFunctions
 using Plots
 
@@ -77,23 +78,12 @@ begin
 end
 
 begin
-    # plot a few snap shot at opposite ends of the motion
-    pos = 15
-    # plot(phis[pos ] .- maximum(phis[pos]), label="x-start")
-    # plot!(phis[pos+flow.N÷2][end:-1:1] .- maximum(phis[pos+flow.N÷2]), label="x-half",marker=:circle,lw=0)
-    xx = plot(phis[pos][1,:])
-    plot!(xx, phis[pos+flow.N÷2][1,end:-1:1])
-    yy = plot(phis[pos][2,:])
-    plot!(yy, -phis[pos+flow.N÷2][2,end:-1:1])
-    plot(xx,yy, layout=(1,2),size=(1000,800))
-end
-begin
     #look at the panel pressure for a foil
     a = plot()
     pressures = @animate for i = 10:flow.N*flow.Ncycles
-        plot(a, foil.col[1,:], ps[:,i]/(0.5*flow.Uinf^2), label="",ylims=(-1,1))
+        plot(a, foil.col[1,:], ps[:,i]/(0.5*flow.Uinf^2), label="",ylims=(-2,5))
     end
-    gif(pressures, "pressures.gif", fps=30)
+    gif(pressures, "../images/pressures.gif", fps=30)
 end
 begin
     # plot a few snap shot at opposite ends of the motion
