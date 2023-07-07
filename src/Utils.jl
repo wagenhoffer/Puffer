@@ -19,7 +19,8 @@ defaultDict = Dict(:T     => Float64,
 	:Uinf   => 1.0,
 	:ρ      => 1000.0, 
     :Nfoils => 1,
-    :pivot  => 0.0)
+    :pivot  => 0.0, 
+    :thick => 0.12)
 
 function plot_current(foil::Foil, wake::Wake; window=nothing)
     if !isnothing(window)

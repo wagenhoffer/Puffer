@@ -117,7 +117,7 @@ function move_edge!(foil::Foil, flow::FlowParams)
     edge_vec ./= norm(edge_vec)
     edge_vec .*= flow.Uinf * flow.Δt 
     #The edge starts at the TE -> advects some scale down -> the last midpoint
-    foil.edge = [foil.foil[:, end] (foil.foil[:, end] .+ 0.4 * edge_vec) foil.edge[:, 2]]
+    foil.edge = [foil.foil[:, end] (foil.foil[:, end] .+ 0.5 * edge_vec) foil.edge[:, 2]]
     #static buffer is a bugger
     # foil.edge = [foil.foil[:, end] (foil.foil[:, end] .+ 0.4 * edge_vec) (foil.foil[:, end] .+ 1.4 * edge_vec)]
     nothing
@@ -130,7 +130,7 @@ end
 rotation(α) = [cos(α) -sin(α)
                sin(α) cos(α)]
 
-               function next_foil_pos(foil::Foil, flow::FlowParams)
+function next_foil_pos(foil::Foil, flow::FlowParams)
     #perform kinematics
     if typeof(foil.kine) == Vector{Function}
         h = foil.kine[1](foil.f, flow.n * flow.Δt)

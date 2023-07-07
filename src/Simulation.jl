@@ -85,10 +85,10 @@ function get_performance(foil, flow, p)
     thrust = force[1]
     power  = sum(dpress, dims=1)[1]
 
-    [sum(sqrt.(force .^ 2)), #C_forces
-    lift,    #C_lift
-    thrust,
-    power / flow.Uinf]      #C_power    
+    [sum(sqrt.(force .^ 2)), 
+     lift,    
+     thrust,
+     power / flow.Uinf]      
 end
 
 

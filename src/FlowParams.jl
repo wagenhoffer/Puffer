@@ -20,7 +20,7 @@ function init_params(; kwargs...)
 	T = kwargs[:T]
     N = kwargs[:N]
 	chord = T(kwargs[:chord])
-	naca0012 = make_naca(N + 1; chord = chord) .|> T
+	naca0012 = make_naca(N + 1; chord = chord, thick=T(kwargs[:thick])) .|> T
 	if haskey(kwargs,:motion_parameters)
 		kine = eval(kwargs[:kine])(kwargs[:motion_parameters]...)
 	else

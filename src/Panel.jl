@@ -186,6 +186,9 @@ function panel_pressure(foil::Foil, flow,  old_mus, old_phis, phi)
 
     qt = get_qt(foil)
     qt .+= repeat((foil.σs)', 2, 1) .* foil.normals 
+    # qt .-= foil.wake_ind_vel.* foil.tangents
+    # qt .+=  ((-flow.Uinf .+ foil.panel_vel[1, :]) .* foil.tangents[1, :] .+
+            # (-flow.Uinf  .+ foil.panel_vel[2, :]) .* foil.tangents[2, :])'
     p_s = sum((qt + foil.wake_ind_vel) .^ 2, dims=1) / 2.0
     p_us = dmudt' + dphidt' - (qt[1, :]' .* (-flow.Uinf .+ foil.panel_vel[1, :]')
                                .+
