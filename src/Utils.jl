@@ -10,6 +10,7 @@ using SpecialFunctions
 
 defaultDict = Dict(:T     => Float64,
 	:N     => 64,
+    :foil_type => :make_naca,
 	:kine  => :make_ang,
 	:f     => 1,
 	:k     => 1,
@@ -67,4 +68,15 @@ function plot_with_normals(foil::Foil)
     plot(foil.foil[1, :], foil.foil[2, :], aspect_ratio=:equal, label="")
     quiver!(foil.col[1, :], foil.col[2, :],
         quiver=(foil.normals[1, :], foil.normals[2, :]))
+end
+
+function plot_coeffs(coeffs, flow)
+	t = range(0, stop=flow.Ncycles*flow.N*flow.Δt, length=flow.Ncycles*flow.N)
+    start = flow.N
+    a = plot(t[start:end], coeffs[1,start:end], label="Force"  ,lw = 3, marker=:circle)
+    b = plot(t[start:end], coeffs[2,start:end], label="Lift"   ,lw = 3, marker=:circle)
+    c = plot(t[start:end], coeffs[3,start:end], label="Thrust" ,lw = 3, marker=:circle)
+    d = plot(t[start:end], coeffs[4,start:end], label="Power"  ,lw = 3, marker=:circle)
+    p = plot(a,b,c,d, layout=(2,2), legend=:topleft, size =(800,800))
+	p 
 end

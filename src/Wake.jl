@@ -105,6 +105,7 @@ function release_vortex!(wake::Wake, foil::Foil)
     end
     nothing
 end
+
 function cancel_buffer_Γ!(wake::Wake, foil::Foil)
     #TODO : Add iterator for matching 1->i for nth foil
     wake.xy[:, 1] = foil.edge[:, end]
@@ -113,18 +114,6 @@ function cancel_buffer_Γ!(wake::Wake, foil::Foil)
     if foil.μ_ledge[2] != 0
         wake.xy[:, 2] = foil.ledge[:, end]
         wake.Γ[2] = -foil.μ_ledge[end]
-    end
-    nothing
-end
-function cancel_buffer_Γ!(wake::Wake{T}, foils::Vector{Foil{T}}) where T<:Real
-    for i in CartesianIndices(foils)
-        wake.xy[:, i] = foils[i].edge[:, end]
-        wake.Γ[i] = -foils[i].μ_edge[end]
-        #LESP --> TODO: fix for multiple swimmers
-        if foils[i].μ_ledge[2] != 0
-            wake.xy[:, 2] = foil.ledge[:, end]
-            wake.Γ[2] = -foil.μ_ledge[end]
-        end
     end
     nothing
 end

@@ -11,7 +11,7 @@ heave_pitch[:Ncycles] = 5
 heave_pitch[:f] = 1.
 heave_pitch[:Uinf] = 2
 heave_pitch[:kine] = :make_heave_pitch
-θ0 = deg2rad(0)
+θ0 = deg2rad(2)
 h0 = 0.1
 heave_pitch[:motion_parameters] = [h0, θ0]
 
@@ -99,15 +99,22 @@ begin
     h0 = 0.1
     heave_pitch[:motion_parameters] = [h0, θ0]
     foil, flow = init_params(;heave_pitch...)
-    vx = plot()
-    vy = plot()
-    for i in 1:flow.N
+    t = flow.Δt:flow.Δt:flow.N*flow.Ncycles*flow.Δt
+    vx = zeros(flow.N*flow.Ncycles)
+    vy = zeros(flow.N*flow.Ncycles)
+    for i in 1:flow.N*flow.Ncycles
         (foil)(flow)
         get_panel_vels!(foil, flow)
-        plot!(vx, foil.panel_vel[1,:], label="")    
-        plot!(vy, foil.panel_vel[2,:], label="")        
+        vx[i] = foil.panel_vel[1,1]    
+        vy[i] = foil.panel_vel[2,1]
     end
-    plot(vx,vy, layout=(1,2))
+    plot(t, vx, label="Vx")
+    plot!(t, vy, label="Vy")
+    vya = zeros(size(t))
+    @. vya = 2π*foil.f*h0*cos(2π*foil.f*t)
+    plot!(t, vya, label="Vya")
+
+    @show sum(abs2, vya-vy)
 end
 begin
     #look at the panel velocity for a pitching foil

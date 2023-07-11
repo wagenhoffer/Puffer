@@ -109,6 +109,7 @@ function time_increment!(flow::FlowParams, foil::Foil, wake::Wake)
     (foil)(flow)
     
     A, rhs, edge_body = make_infs(foil)
+    A[getindex.(A .== diag(A))] .= 0.5
     setσ!(foil, flow)    
     foil.wake_ind_vel = vortex_to_target(wake.xy, foil.col, wake.Γ, flow)
     normal_wake_ind = sum(foil.wake_ind_vel .* foil.normals, dims=1)'
@@ -217,7 +218,7 @@ function get_dphidt!(oldphi, phi, flow::FlowParams)
 end
 
 function get_dt(values, flow::FlowParams)
-     (3 * values[1, :] - 4 * values[2, :] + values[2, :]) / (2 * flow.Δt)
+     (3 * values[1, :] - 4 * values[2, :] + values[3, :]) / (2 * flow.Δt)
 end
 
 function roll_values!(oldvals, newval)

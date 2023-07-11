@@ -37,6 +37,75 @@ function make_naca(N; chord=1, thick=0.12)
     foil .* chord
 end
 
+function make_teardrop(N; chord=1, thick=0.01)
+    # Generate points for the bottom surface
+    xb = LinRange(pi, 0, (N + 2) ÷ 2)
+    xt = LinRange(0, pi, (N + 2) ÷ 2)
+
+    # Slopes and intersects for the line segments
+    m = -thick/2 / (chord - thick/2)
+    b = thick/2 + thick^2/4 / (chord - thick/2)
+
+    # Tear drop shape equation.
+    x_c = 0.5 .* (1 .- cos.(xb))
+    xb = x_c .* chord
+    xb1 = filter(x -> x <= thick/2, xb)
+    xb2 = filter(x -> x > thick/2, xb)
+
+    zb2 = -m .* xb2 .- b
+    zb1 = -sqrt.((thick/2)^2 .- (xb1 .- thick/2).^2)
+    zb = vcat(zb2, zb1)
+
+    # Tear drop shape equation.
+    x_c = 0.5 .* (1 .- cos.(xt))
+    xt = x_c .* chord
+    xt1 = filter(x -> x <= thick/2, xt)
+    xt2 = filter(x -> x > thick/2, xt)
+
+    zt1 = sqrt.((thick/2)^2 .- (xt1 .- thick/2).^2)
+    zt2 = m .* xt2 .+ b
+    zt = vcat(zt1, zt2)
+
+    zb[1] = 0
+    zt[1] = 0
+    zb[end] = 0
+
+    # Merge top and bottom surfaces together
+    x = vcat(xb, xt[2:end])
+    z = vcat(zb, zt[2:end])
+
+    [x'; z']
+end
+
+function make_vandevooren(N; chord=1.0, thick=0.75, K=1.93)
+    A = chord * ((1 + thick)^(K - 1)) * (2^(-K))
+    THETA = LinRange(0, pi, Int(N ÷ 2) + 1)
+
+    R1 = sqrt.((A * cos.(THETA) .- A).^2 + (A^2) .* sin.(THETA).^2)
+    R2 = sqrt.((A * cos.(THETA) .- thick * A).^2 + (A^2) .* sin.(THETA).^2)
+
+    THETA1 = atan.(A * sin.(THETA), A * cos.(THETA) .- A)
+    THETA2 = atan.(A * sin.(THETA), A * cos.(THETA) .- thick * A)
+
+    x = ((R1.^K) ./ (R2.^(K - 1))) .* (cos.(K * THETA1) .* cos.((K - 1) * THETA2) + sin.(K * THETA1) .* sin.((K - 1) * THETA2))
+    z_top = ((R1.^K) ./ (R2.^(K - 1))) .* (sin.(K * THETA1) .* cos.((K - 1) * THETA2) - cos.(K * THETA1) .* sin.((K - 1) * THETA2))
+    z_bot = -((R1.^K) ./ (R2.^(K - 1))) .* (sin.(K * THETA1) .* cos.((K - 1) * THETA2) - cos.(K * THETA1) .* sin.((K - 1) * THETA2))
+
+    x = x .- x[end]  # Carrying the leading edge to the origin
+    x[1] = chord
+
+    z_top[1] = 0
+    z_bot[1] = 0
+    z_bot[end] = 0
+
+    # Merge top and bottom surfaces together
+    x = vcat(x, x[end-1:-1:1])
+    z = vcat(z_bot, z_top[end-1:-1:1])
+
+    [x'; z']
+end
+
+
 function make_waveform(a0=0.1, a=[0.367, 0.323, 0.310]; T=Float64)
     a0 = T(a0)
     a = a .|> T
@@ -117,13 +186,13 @@ function move_edge!(foil::Foil, flow::FlowParams)
     edge_vec ./= norm(edge_vec)
     edge_vec .*= flow.Uinf * flow.Δt 
     #The edge starts at the TE -> advects some scale down -> the last midpoint
-    foil.edge = [foil.foil[:, end] (foil.foil[:, end] .+ 0.5 * edge_vec) foil.edge[:, 2]]
+    foil.edge = [foil.foil[:, end] (foil.foil[:, end] .+ 0.4 * edge_vec) foil.edge[:, 2]]
     #static buffer is a bugger
     # foil.edge = [foil.foil[:, end] (foil.foil[:, end] .+ 0.4 * edge_vec) (foil.foil[:, end] .+ 1.4 * edge_vec)]
     nothing
 end
 
-function set_collocation!(foil::Foil, S=0.009)
+function set_collocation!(foil::Foil, S=0.005)
     foil.col = (get_mdpts(foil.foil) .+ repeat(S .* foil.panel_lengths', 2, 1) .* -foil.normals)
 end
 
@@ -193,20 +262,4 @@ function rotate_about(foil, θ)
     pos[1, :] .+= foil.pivot 
     pos
 end
-function set_edge_strength!(foil::Foil)
-    """Assumes that foil.μs has been set for the current time step 
-        TODO: Extend to perform streamline based Kutta condition
-    """
-    foil.μ_edge[2] = foil.μ_edge[1]
-    foil.μ_edge[1] = foil.μs[end] - foil.μs[1]
-    nothing
-end
-function set_ledge_strength!(foil::Foil)
-    """Assumes that foil.μs has been set for the current time step 
-        TODO: Extend to perform streamline based Kutta condition
-    """
-    mid = foil.N ÷ 2
-    foil.μ_ledge[2] = foil.μ_ledge[1]
-    foil.μ_ledge[1] = foil.μs[mid] - foil.μs[mid+1]
-    nothing
-end
+
