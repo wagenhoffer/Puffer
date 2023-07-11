@@ -2,7 +2,8 @@
 include("../src/BemRom.jl")
 
 using Plots
-begin
+
+function aoas()
 	#DO a sweep and compare with experimental results
 	# https://turbmodels.larc.nasa.gov/NACA0012_validation/CL_Gregory_expdata.dat
 	gregory = [0.0943692 0.0257134
@@ -31,7 +32,6 @@ begin
 		gregComp[:aoa] = -(gregory[i, 1] * pi / 180)
 		@show gregComp[:aoa]
 		foil, flow, wake, perf = run_sim(; gregComp...)
-
 		coeffs[i] = perf[2]
 		a = plot_current(foil, wake)
 		a
@@ -50,7 +50,7 @@ begin
 
 	plot(a, b, layout = (2, 1), size = (800, 800))
 end
-
+aoas()
 
 begin
 	#look at the coefficicent of pressure for a single angle of attack
@@ -93,3 +93,53 @@ end
 
 
 
+begin
+	#DO a sweep and compare with experimental results
+	# quinn2014fig17
+
+
+	quinn = deepcopy(defaultDict)
+	quinn[:f] = 1.0
+	quinn[:Uinf] = 500.0
+	quinn[:kine] = :no_motion
+	quinn[:Ncycles] = 1
+	quinn[:foil_type] = :make_vandevooren
+	quinn[:thick] = 0.075
+	alphas = [0, 4, 8]
+	cps = zeros(size(alphas)[1], quinn[:N])
+	q∞ = 0.5*quinn[:Uinf]^2
+	for i ∈ axes(alphas,1)
+		quinn[:aoa] = -(alphas[i] * pi / 180)
+		@show quinn[:aoa]
+
+	
+		foil, flow = init_params(;quinn...)
+		k = foil.f*foil.chord/flow.Uinf
+		foil._foil = (foil._foil' * rotation(quinn[:aoa])')'
+		wake = Wake(foil)
+		(foil)(flow)
+		#data containers
+		old_mus, old_phis = zeros(3,foil.N), zeros(3,foil.N)   
+		phi = zeros(foil.N)
+		coeffs = zeros(4,flow.Ncycles*flow.N)
+		ps = zeros(foil.N , 1)
+		### EXAMPLE OF AN PERFROMANCE METRICS LOOP
+		for i in 1:flow.Ncycles*flow.N
+			time_increment!(flow, foil, wake)
+			phi =  get_phi(foil, wake)                                   
+			p = panel_pressure(foil, flow,  old_mus, old_phis, phi)        
+			old_mus = [foil.μs'; old_mus[1:2,:]]
+			old_phis = [phi'; old_phis[1:2,:]]
+			coeffs[:,i] = get_performance(foil, flow, p)
+			ps[:,1] = p
+		end
+		cps[i,:] = ps[:,1]
+	
+	end
+
+	a0 = plot(foil.col[1,:], cps[1,:]./q∞, label="", ylims=(-1,4),marker=:utri)
+	a4 = plot(foil.col[1,:], cps[2,:]./q∞, label="", ylims=(-1,4),marker=:utri)
+	a8 = plot(foil.col[1,:], cps[3,:]./q∞, label="", ylims=(-1,4),marker=:utri)
+	plot(a0,a4,a8, layout = (1,3), size=(1000,400))
+		
+end

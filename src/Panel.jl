@@ -1,9 +1,9 @@
 #  Panel# related functions
 
 source_inf(x1, x2, z) = (x1 * log(x1^2 + z^2) - x2 * log(x2^2 + z^2) - 2 * (x1 - x2)
-                         + 2 * z * (atan(z, x2) - atan(z, x1))) / (4π)
+                         + 2 * z * (mod2pi(atan(z, x2)) - mod2pi(atan(z, x1)))) / (4π)
 
-doublet_inf(x1, x2, z) = -(atan(z, x2) - atan(z, x1)) / (2π)
+doublet_inf(x1, x2, z) = -(mod2pi(atan(z, x2)) - mod2pi(atan(z, x1))) / (2π)
 
 get_mdpts(foil) = (foil[:, 2:end] + foil[:, 1:end-1]) ./ 2
 
@@ -91,9 +91,10 @@ end
 
 function make_infs(foil::Foil; ϵ=1e-10)
     x1, x2, y = panel_frame(foil.col, foil.foil)
-    # ymask = abs.(y) .> ϵ
-    # y = y .* ymask
+    ymask = abs.(y) .> ϵ
+    y = y .* ymask
     doubletMat = doublet_inf.(x1, x2, y)
+    # doubletMat[getindex.(doubletMat .== diag(doubletMat))] .= 0.5
     sourceMat = source_inf.(x1, x2, y)
     x1, x2, y = panel_frame(foil.col, foil.edge)
     edgeInf = doublet_inf.(x1, x2, y)
@@ -174,29 +175,20 @@ function setσ!(foil::Foil, flow::FlowParams;)
 end
 
 function panel_pressure(foil::Foil, flow,  old_mus, old_phis, phi)
-    # wake_ind += edge_to_body(foil, flow)
-    normal_wake_ind = sum(foil.wake_ind_vel .* foil.normals, dims=1)'
+    # foil.wake_ind_vel += edge_to_body(foil, flow)
 
-    # dmudt, old_mus = get_dmudt!(old_mus, foil, flow)
-    # dphidt, old_phis = get_dphidt!(old_phis, phi, flow)
-    #do the roll outide of this function, allows for iteration
     dmudt = get_dt([foil.μs'; old_mus[1:2,:]],flow)
     dphidt = get_dt([phi'; old_phis[1:2,:]],flow)
     
-
     qt = get_qt(foil)
-    qt .+= repeat((foil.σs)', 2, 1) .* foil.normals 
-    # qt .-= foil.wake_ind_vel.* foil.tangents
-    # qt .+=  ((-flow.Uinf .+ foil.panel_vel[1, :]) .* foil.tangents[1, :] .+
-            # (-flow.Uinf  .+ foil.panel_vel[2, :]) .* foil.tangents[2, :])'
-    p_s = sum((qt + foil.wake_ind_vel) .^ 2, dims=1) / 2.0
-    p_us = dmudt' + dphidt' - (qt[1, :]' .* (-flow.Uinf .+ foil.panel_vel[1, :]')
-                               .+
-                               qt[2, :]' .* (foil.panel_vel[2, :]'))
+    qt .+= repeat(foil.σs', 2, 1) .* foil.normals
+    qt .-= foil.wake_ind_vel.*foil.normals
 
+    p_s  = sum((qt  - foil.wake_ind_vel) .^ 2, dims=1) /2.0
+    p_us = dmudt' + dphidt' - sum(([-flow.Uinf; 0] .+ foil.panel_vel) .* qt, dims=1) 
     # Calculate the total pressure coefficient
     """
-    ∫∞→Px1 d(∇×Ψ)/dt dC + dΦ/dt|body - (VG + VGp + (Ωxr))⋅∇Φ + 1/2||∇Φ +(∇×Ψ)|^2  = Pinf - Px1 /ρ
+    ∫∞→Px1 d(∇×Ψ)/dt dC + dΦ/dt|body - (VG + VGp + (Ωxr))⋅∇(Φ + ϕ) + 1/2||∇Φ +(∇×Ψ)|^2  = Pinf - Px1 /ρ
     """
     p = p_s + p_us
     p
@@ -207,3 +199,21 @@ function edge_to_body(foil::Foil, flow::FlowParams)
     ps = foil.edge[:, 1:2]
     vortex_to_target(ps, foil.col, Γs, flow)
 end
+
+
+
+    # foil.wake_ind_vel -= edge_to_body(foil, flow)
+    normal_wake_ind = sum(foil.wake_ind_vel .* foil.normals, dims=1)'
+
+    # dmudt, old_mus = get_dmudt!(old_mus, foil, flow)
+    # dphidt, old_phis = get_dphidt!(old_phis, phi, flow)
+    #do the roll outide of this function, allows for iteration
+    dmudt = get_dt([foil.μs'; old_mus[1:2,:]],flow)
+    dphidt = get_dt([phi'; old_phis[1:2,:]],flow)
+    
+    qt = get_qt(foil)
+    qt .+= repeat((foil.σs)', 2, 1) .* foil.normals 
+    qt .-= foil.wake_ind_vel .*foil.tangents
+
+    p_s = sum((qt - foil.wake_ind_vel) .^ 2, dims=1) / 2.0
+    p_us = dmudt' + dphidt' - sum(([-flow.Uinf 0]' .+ foil.panel_vel) .* qt, dims=1) 

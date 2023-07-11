@@ -96,29 +96,31 @@ end
 
  plot_current(foil,wake)
 
- begin
-	garrick = deepcopy(defaultDict)
-	garrick[:Nt] = 64
-	garrick[:N] = 256
-	garrick[:Ncycles] = 5
-	garrick[:f] = 0.5
-    garrick[:Uinf] = 1.0
-	garrick[:kine] = :make_heave_pitch
-	garrick[:pivot] = 0.25
-	garrick[:thick] = 0.001
+ function moored_teardrop()
+	moored = deepcopy(defaultDict)
+	moored[:Nt] = 64
+	moored[:N] = 64
+
+	moored[:Ncycles] = 10
+	moored[:f] = 0.5
+    moored[:Uinf] = 1.0
+	moored[:kine] = :make_heave_pitch
+	moored[:pivot] = 0.25
+	moored[:thick] = 0.01
+	moored[:foil_type] = :make_teardrop
 	θ0 = deg2rad(0)
-	h0 = 0.001
-	garrick[:motion_parameters] = [h0, θ0]
+	h0 = 0.01
+	moored[:motion_parameters] = [h0, θ0]
 
 
-	foil, flow, wake, coeffs = run_sim(; garrick...)
-	plot_current(foil, wake)
-	plot_coeffs(coeffs/(0.5*flow.Uinf^2),flow)
- end
+	foil, flow, wake, coeffs = run_sim(; moored...)
+	coeffs ./= (0.5*flow.Uinf^2)
+	# plot_current(foil, wake)
+	# plot_coeffs(coeffs/(0.5*flow.Uinf^2),flow)
 
- begin
 	# Change thickness to 0.1%
 	#pure heaving compare - Quinn, moored
+	q∞ = 0.5*flow.Uinf^2
 	St = 2*h0*foil.f/flow.Uinf
 	k = π*foil.f*foil.chord/flow.Uinf
 	@show St, k
@@ -127,8 +129,9 @@ end
 	ck = theod(k)
 	@. cl = -2*π^2*St*abs.(ck)*cos(2π.*τ + angle(ck)) - π^2*St*k*sin(2π.*τ)
 	
-	plot(τ, cl, label="Theo Lift",lw=3)
-	plot!(τ[flow.N:end], coeffs[2, flow.N:end]./q∞, marker=:circle, label="BEM Lift")
+	shift = 5
+	plot(τ[flow.N:end-shift], coeffs[2, flow.N+shift:end], marker=:circle, label="BEM Lift")
+	plot!(τ, cl, label="Theo Lift",lw=3,ylims=(-0.25,0.25))
  end
 
  begin
@@ -151,8 +154,15 @@ end
 	println("\t$(mean(coeffs[3,flow.N:end]/q∞)) \t $(maximum(coeffs[2,flow.N:end]/q∞))")
  end
 
-begin
-	ks = LinRange(0.1, 4.0/π, 10).*π
+function young1516()
+	""" Fig 15 and 16 recreation
+	Fig. 15 Mean thrust coefficient vs reduced frequency, N–S (Re =
+	2 × 104, laminar), UPM, and Garrick14 analysis results, NACA 0012,
+	plunging motion, kh = 0.3
+	Fig. 16 Peak lift coefficient vs reduced frequency, N–S (Re = 2 × 104,
+	laminar), UPM, and Garrick14 analysis results, NACA 0012, plunging
+	motion, kh = 0.3"""
+	ks = LinRange(0.1, 10.0/π, 8).*π
 	#until k = 4 is good accordging to the paper
 	
 	cts = zeros(2,length(ks))
@@ -160,11 +170,14 @@ begin
 
 	for (i,k) in enumerate(ks)
 	# for (i,freq) in enumerate(ctmvsk[:,1])
-		
+		garrick[:Uinf] = 1.0
 		garrick[:f] = k./π
 		garrick[:thick] = 0.12
+		garrick[:foil_type] = :make_naca
+		garrick[:Ncycles] = 5
+
 		θ0 = deg2rad(0)	
-		# h0 = 0.01			
+		
 		h0 = 0.3/k  
 		garrick[:motion_parameters] = [h0, θ0]
 		
@@ -182,26 +195,20 @@ begin
 		Clpeak = 4*π*(k*h0)*B
 		cls[1,i] = Clpeak 
 	end
-	# why 1.5?
+
 	thrust = plot(ks, cts[1,:], marker=:utri, label="Garrick")
 	plot!(thrust, ks , cts[2,:], marker =:circle, label="BEM")
 	xlabel!(thrust, "k")
 	ylabel!(thrust, "C_Tm}")
 	lift = plot(ks ,cls[1,:], label="Garrick")
-	plot!(lift,ks , cls[2,:]./1.5, marker =:circle, label="BEM")
+	plot!(lift,ks , cls[2,:], marker =:circle, label="BEM")
 	xlabel!(lift, "k")
 	ylabel!(lift, "C_{Lp}")
 	plot(thrust, lift, layout=(1,2), size=(800,400))
 end
 
 begin
-	""" Fig 15 and 16 recreation
-	Fig. 15 Mean thrust coefficient vs reduced frequency, N–S (Re =
-	2 × 104, laminar), UPM, and Garrick14 analysis results, NACA 0012,
-	plunging motion, kh = 0.3
-	Fig. 16 Peak lift coefficient vs reduced frequency, N–S (Re = 2 × 104,
-	laminar), UPM, and Garrick14 analysis results, NACA 0012, plunging
-	motion, kh = 0.3"""
+
 	ctmvsk= [0.216  0.632
 			0.48 0.461
 			1.007 0.355
@@ -232,13 +239,14 @@ begin
 	plot(clpvsk[:,1], clpvsk[:,2], marker=:dtri)
  end
 
-begin	
+
 """try to make young aiaa2004 Fig 4."""
+function young4()
 	young = deepcopy(defaultDict)
 	young[:Nt] = 64
-	young[:N] = 128
-	young[:Ncycles] = 5
-	young[:f] = 0.5
+	young[:N] = 64
+	young[:Ncycles] = 6
+	young[:f] = 8.0/π
     young[:Uinf] = 1.0
 	young[:kine] = :make_heave_pitch
 	young[:pivot] = 0.25
@@ -247,9 +255,64 @@ begin
 	h0 = 0.0
 	young[:motion_parameters] = [h0, θ0]
 
-
+	
 	foil, flow, wake, coeffs = run_sim(; young...)
+	k = π*foil.f/flow.Uinf
+	@show rad2deg(θ0), k
 	plot_current(foil, wake)
-	plot_coeffs(coeffs/(0.5*flow.Uinf^2),flow)
+	plot_coeffs(coeffs./(0.5*flow.Uinf^2), flow)
+end
 
+
+
+	"""try to make young aiaa2004 Fig 17.
+	
+	"""
+function young17()
+	young = deepcopy(defaultDict)
+	young[:Nt] = 64
+	young[:N] = 64
+	young[:Ncycles] = 3
+	
+	young[:Uinf] = 1.0
+	young[:kine] = :make_heave_pitch
+	young[:pivot] = 0.25
+	young[:thick] = 0.12
+	q∞ = 0.5*young[:Uinf]^2
+	ks = [2 4 8].|>Float64
+	cps = zeros(length(ks), young[:N])
+	for (i,k) in enumerate(ks)
+		
+		θ0 = deg2rad(0)
+		h0 = 0.3/k
+		young[:motion_parameters] = [h0, θ0]
+		young[:f] = k*young[:Uinf]/π
+		
+		foil, flow = init_params(;young...)
+		
+		
+		wake = Wake(foil)
+		(foil)(flow)
+		#data containers
+		old_mus, old_phis = zeros(3,foil.N), zeros(3,foil.N)   
+		phi = zeros(foil.N)
+		coeffs = zeros(4,flow.Ncycles*flow.N)
+		p = zeros(foil.N)
+		### EXAMPLE OF AN PERFROMANCE METRICS LOOP
+		for i in 1:(flow.Ncycles-1)*flow.N + flow.N÷4 -1
+			time_increment!(flow, foil, wake)
+			phi =  get_phi(foil, wake)                                   
+			p = panel_pressure(foil, flow,  old_mus, old_phis, phi)        
+			old_mus = [foil.μs'; old_mus[1:2,:]]
+			old_phis = [phi'; old_phis[1:2,:]]
+			coeffs[:,i] = get_performance(foil, flow, p)
+	
+		end
+		cps[i,:] = p/q∞
+	end
+	# cps ./= q∞
+	plot(foil.col[1,:], cps[1, :], label="k = 2")
+	plot!(foil.col[1,:], cps[2, :], label="k = 4")
+	plot!(foil.col[1,:], cps[3, :], label="k = 8")
+	plot!(ylims=(-11,11),yflip=true)
 end
