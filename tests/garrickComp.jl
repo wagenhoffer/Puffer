@@ -33,80 +33,17 @@ function plot_coeffs(coeffs, flow)
 end
 
 
-begin
-	RHO = RHO = 1.0
-	b = foil.chord / 2.0
-	
-	# t = flow.Δt:flow.Δt:flow.N*flow.Ncycles*flow.Δt
-	t = LinRange(0,flow.Ncycles/foil.f,flow.Ncycles*flow.N)
-	
-	ω = 2π * foil.f
-	k = ω *b / (2*flow.Uinf)
-    
-	ϕ = pi/2
-	ϕ = 0.0
-	@show ϕ
-	a = -1.0 #-1 is rotation about leading edge
-	theo = 1im * hankelh1(1, k) / (hankelh1(0, k) + 1im * hankelh1(1, k))
-	theod(k) = 1im * hankelh1(1, k) / (hankelh1(0, k) + 1im * hankelh1(1, k))
-	F, G = real(theo), imag(theo)
-	R = π * θ0 * (k^2 / 2 * (0.125 + a^2) + (0.5 + a) * (F - (0.5 - a) * k * G))
-	I = -π * θ0 * (k / 2 * (0.5 - a) - (0.5 + a) * (G + (0.5 - a) * k * F))
-	ϕ = Φ = atan(I, R)
-	gar = sqrt.(R .^ 2 + I .^ 2) # *  0.5* RHO* flow.Uinf^2* foil.chord
-	Cl = gar .* exp.(1im * ω * t)
-	M = gar .* exp.(1im * ω * t .+ Φ)
-	den = foil.chord^2 * foil.f^2 * (θ0 * foil.chord + h0)
-	
-	inst_lift = zeros(size(t))
-	@. inst_lift =
-		-RHO * b^2 * (flow.Uinf * pi * θ0 * ω * cos(ω * t + ϕ) - pi * h0 * ω^2 * sin(ω * t) +
-					  pi * b * a * θ0 * ω^2 * sin(ω * t + ϕ)) - 2.0 * pi * RHO * flow.Uinf * b * F * (flow.Uinf * θ0 * sin(ω * t + ϕ) +
-											  h0 * ω * cos(ω * t) + b * (0.5 - a) * θ0 * ω * cos(ω * t + ϕ)) -
-		2.0 * pi * RHO * flow.Uinf * b * G * (flow.Uinf * θ0 * cos(ω * t + ϕ) - h0 * ω * sin(ω * t) - b * (0.5 - a) * θ0 * ω * sin(ω * t + ϕ))
-    @show k, ϕ , k/ϕ
-	
-	plot(t[25:end], coeffs[2, 25:end]/2.0, marker = :circle, lw = 0, ms = 3, label = "BEM  \$C_L\$")
-	plot!(t, inst_lift, label = "Garrick  \$C_L\$",lw=3)   
-end
-
-begin
-	t =	 collect(flow.Δt:flow.Δt:flow.N*flow.Ncycles*flow.Δt) 
-	# load up values to match their defns
-	ω = 2π*foil.f
-	k = ω*foil.chord/2/flow.Uinf
-	#Katz and Plotkin eqn 13.73a
-	phi = ϕ = 0.#-π/2 #angle(theod(k))
-	alpha = θ0*sin.(ω*t .+ phi)
-	heave = h0*sin.(ω*t)
-	alphadot = θ0*ω*cos.(ω*t .+ phi)
-	alphadotdot = -θ0*ω^2*sin.(ω*t .+ phi)
-	hdot = h0*ω*cos.(ω*t)
-	hdotdot = -h0*ω^2*sin.(ω*t)
-	
-	lift = π*RHO*flow.Uinf*foil.chord*theod(k)*(flow.Uinf*alpha - hdot + 0.75*foil.chord*alphadot) + 
-		π*RHO*foil.chord^2/4.0 *(flow.Uinf*alphadot - hdotdot + foil.chord/2.0*alphadotdot)
-
-	plot(t, real(lift), label="Katz and Plotkin  \$C_L\$",lw=3)
-	plot!(t[25:end], coeffs[2, 25:end], marker = :circle, lw = 0, ms = 3, label = "BEM  \$C_L\$")
-end
-
-
-
-
- plot_current(foil,wake)
-
- function moored_teardrop()
+function moored_teardrop()
 	moored = deepcopy(defaultDict)
 	moored[:Nt] = 64
 	moored[:N] = 64
 
 	moored[:Ncycles] = 10
 	moored[:f] = 0.5
-    moored[:Uinf] = 1.0
+	moored[:Uinf] = 1.0
 	moored[:kine] = :make_heave_pitch
 	moored[:pivot] = 0.25
-	moored[:thick] = 0.01
+	moored[:thick] = 0.001
 	moored[:foil_type] = :make_teardrop
 	θ0 = deg2rad(0)
 	h0 = 0.01
@@ -128,13 +65,14 @@ end
 	cl = zeros(size(τ))
 	ck = theod(k)
 	@. cl = -2*π^2*St*abs.(ck)*cos(2π.*τ + angle(ck)) - π^2*St*k*sin(2π.*τ)
-	
-	shift = 5
+
+	shift = 0
 	plot(τ[flow.N:end-shift], coeffs[2, flow.N+shift:end], marker=:circle, label="BEM Lift")
 	plot!(τ, cl, label="Theo Lift",lw=3,ylims=(-0.25,0.25))
- end
+end
 
- begin
+
+begin
 	""" Oscillation Frequency and Amplitude Effects on the Wake of a Plunging Airfoil
 	J. Young∗ and J. C. S. Lai """
 	q∞ = 0.5*flow.Uinf^2
@@ -154,7 +92,8 @@ end
 	println("\t$(mean(coeffs[3,flow.N:end]/q∞)) \t $(maximum(coeffs[2,flow.N:end]/q∞))")
  end
 
-function young1516()
+
+ function young1516()
 	""" Fig 15 and 16 recreation
 	Fig. 15 Mean thrust coefficient vs reduced frequency, N–S (Re =
 	2 × 104, laminar), UPM, and Garrick14 analysis results, NACA 0012,
@@ -162,7 +101,18 @@ function young1516()
 	Fig. 16 Peak lift coefficient vs reduced frequency, N–S (Re = 2 × 104,
 	laminar), UPM, and Garrick14 analysis results, NACA 0012, plunging
 	motion, kh = 0.3"""
-	ks = LinRange(0.1, 10.0/π, 8).*π
+	upm = deepcopy(defaultDict)
+	upm[:Nt]        = 64
+	upm[:N]         = 64
+	upm[:Ncycles]   = 5
+	upm[:f]         = 0.5
+    upm[:Uinf]      = 1.0
+	upm[:kine]      = :make_heave_pitch
+	upm[:pivot]     = 0.0
+	upm[:foil_type] = :make_naca
+	upm[:thick]     = 0.12
+	θ0 = deg2rad(0)	
+	ks = LinRange(0.1, 4.0/π, 8).*π
 	#until k = 4 is good accordging to the paper
 	
 	cts = zeros(2,length(ks))
@@ -170,18 +120,11 @@ function young1516()
 
 	for (i,k) in enumerate(ks)
 	# for (i,freq) in enumerate(ctmvsk[:,1])
-		garrick[:Uinf] = 1.0
-		garrick[:f] = k./π
-		garrick[:thick] = 0.12
-		garrick[:foil_type] = :make_naca
-		garrick[:Ncycles] = 5
-
-		θ0 = deg2rad(0)	
-		
+		upm[:f] = k./π				
 		h0 = 0.3/k  
-		garrick[:motion_parameters] = [h0, θ0]
+		upm[:motion_parameters] = [h0, θ0]
 		
-		foil, flow, wake, coeffs = run_sim(; garrick...)
+		foil, flow, wake, coeffs = run_sim(; upm...)
 		q∞ = 0.5*flow.Uinf^2
 		cts[2,i] = mean(coeffs[3,flow.N:end]/q∞)
 		cls[2,i] = maximum(coeffs[2,flow.N:end]/q∞)
@@ -190,9 +133,9 @@ function young1516()
 		F, G = real(theo), imag(theo)
 		A = (F^2 + G^2)
 		B = sqrt(F^2 + G^2 + k*G +k^2/4)
-		Ctmean= 4*π*(k*h0)^2*A
-		cts[1,i] = Ctmean
+		Ctmean= 4*π*(k*h0)^2*A		
 		Clpeak = 4*π*(k*h0)*B
+		cts[1,i] = Ctmean
 		cls[1,i] = Clpeak 
 	end
 
@@ -206,39 +149,6 @@ function young1516()
 	ylabel!(lift, "C_{Lp}")
 	plot(thrust, lift, layout=(1,2), size=(800,400))
 end
-
-begin
-
-	ctmvsk= [0.216  0.632
-			0.48 0.461
-			1.007 0.355
-			2.014 0.302
-			3.022 0.282
-			3.981 0.273
-			4.988 0.268
-			5.995 0.266
-			7.962 0.257
-			10.024 0.25
-			12.038 0.25
-			16.019 0.245
-			19.928 0.239]
-	plot(ctmvsk[:,1], ctmvsk[:,2], marker=:dtri)
-	clpvsk = [  0.13 3.12
-				0.42 2.8
-				0.88 2.63
-				1.87 4.28
-				2.96 6.25
-				3.9 8.06
-				4.94 9.87
-				5.97 11.35
-				7.9 14.97
-				9.92 18.75
-				11.9 22.53
-				16 29.11
-				19.92 36.68]
-	plot(clpvsk[:,1], clpvsk[:,2], marker=:dtri)
- end
-
 
 """try to make young aiaa2004 Fig 4."""
 function young4()
@@ -263,12 +173,10 @@ function young4()
 	plot_coeffs(coeffs./(0.5*flow.Uinf^2), flow)
 end
 
-
-
+function young17()
 	"""try to make young aiaa2004 Fig 17.
 	
 	"""
-function young17()
 	young = deepcopy(defaultDict)
 	young[:Nt] = 64
 	young[:N] = 64
@@ -316,3 +224,13 @@ function young17()
 	plot!(foil.col[1,:], cps[3, :], label="k = 8")
 	plot!(ylims=(-11,11),yflip=true)
 end
+
+
+####Run each of the cases
+    # young4 is suspect
+	####
+moored_teardrop()
+young4()
+young1516()
+young17()
+
