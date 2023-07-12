@@ -28,7 +28,7 @@ begin
 
 	foil, flow, wake, coeffs = run_sim(; teng...)
 	coeffs ./= (0.5*flow.Uinf^2)
-    plot_teng(coeffs, flow;ylims=(-.75,.75))
+    plot_teng(coeffs, flow;ylims=(-0.8,0.8))
 end
 
 begin

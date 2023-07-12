@@ -182,9 +182,8 @@ function panel_pressure(foil::Foil, flow,  old_mus, old_phis, phi)
     
     qt = get_qt(foil)
     qt .+= repeat(foil.σs', 2, 1) .* foil.normals
-    qt .-= foil.wake_ind_vel.*foil.normals
-
-    p_s  = sum((qt  - foil.wake_ind_vel) .^ 2, dims=1) /2.0
+    # qt .-= foil.wake_ind_vel
+    p_s  = sum((qt  + foil.wake_ind_vel) .^ 2, dims=1) /2.0
     p_us = dmudt' + dphidt' - sum(([-flow.Uinf; 0] .+ foil.panel_vel) .* qt, dims=1) 
     # Calculate the total pressure coefficient
     """
