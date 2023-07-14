@@ -3,24 +3,8 @@ include("../src/BemRom.jl")
 using SpecialFunctions
 using Plots
 
-begin
-	garrick = deepcopy(defaultDict)
-	garrick[:Nt] = 150
-	garrick[:N] = 150
-	garrick[:Ncycles] = 5
-	garrick[:f] = 0.5
-    garrick[:Uinf] = 1.0
-	garrick[:kine] = :make_heave_pitch
-	garrick[:pivot] = 0.25
-	θ0 = deg2rad(0)
-	h0 = 0.001
-	garrick[:motion_parameters] = [h0, θ0]
+theo(k) = 1im * hankelh1(1, k) / (hankelh1(0, k) + 1im * hankelh1(1, k))
 
-
-	foil, flow, wake, coeffs = run_sim(; garrick...)
-	coeffs ./= (0.5*RHO*flow.Uinf^2)
-end
-	
 function plot_coeffs(coeffs, flow)
 	t = range(0, stop=flow.Ncycles*flow.N*flow.Δt, length=flow.Ncycles*flow.N)
     start = flow.N
@@ -63,7 +47,7 @@ function moored_teardrop()
 	@show St, k
 	τ =	 collect(flow.Δt:flow.Δt:flow.N*flow.Ncycles*flow.Δt) .*foil.f
 	cl = zeros(size(τ))
-	ck = theod(k)
+	ck = theo(k)
 	@. cl = -2*π^2*St*abs.(ck)*cos(2π.*τ + angle(ck)) - π^2*St*k*sin(2π.*τ)
 
 	shift = 0
@@ -71,26 +55,6 @@ function moored_teardrop()
 	plot!(τ, cl, label="Theo Lift",lw=3,ylims=(-0.25,0.25))
 end
 
-
-begin
-	""" Oscillation Frequency and Amplitude Effects on the Wake of a Plunging Airfoil
-	J. Young∗ and J. C. S. Lai """
-	q∞ = 0.5*flow.Uinf^2
-	α = rad2deg(θ0)
-	k = π*foil.f*foil.chord/flow.Uinf
-	kα = k*α
-	theo = theod(k)
-	F, G = real(theo), imag(theo)
-	A = (F^2 + G^2)
-	B = sqrt(F^2 + G^2 + k*G +k^2/4)
-	Ctmean= 4*π*(k*h0)^2*A
-	# Ctmean= 4*π*(k*h0/2.0)^2*A # single side amp?
-	Clpeak = 4*π*(k*h0)*B
-	#fig4
-	println("k = $k kh = $(k*h0)")
-    println("Ctmean = $Ctmean \t Clpeak = $Clpeak")
-	println("\t$(mean(coeffs[3,flow.N:end]/q∞)) \t $(maximum(coeffs[2,flow.N:end]/q∞))")
- end
 
 
  function young1516()
@@ -129,8 +93,8 @@ begin
 		cts[2,i] = mean(coeffs[3,flow.N:end]/q∞)
 		cls[2,i] = maximum(coeffs[2,flow.N:end]/q∞)
 		k = π*foil.f*foil.chord/flow.Uinf	
-		theo = theod(k)
-		F, G = real(theo), imag(theo)
+		theod = theo(k)
+		F, G = real(theod), imag(theod)
 		A = (F^2 + G^2)
 		B = sqrt(F^2 + G^2 + k*G +k^2/4)
 		Ctmean= 4*π*(k*h0)^2*A		

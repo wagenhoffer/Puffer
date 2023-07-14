@@ -198,21 +198,3 @@ function edge_to_body(foil::Foil, flow::FlowParams)
     ps = foil.edge[:, 1:2]
     vortex_to_target(ps, foil.col, Γs, flow)
 end
-
-
-
-    # foil.wake_ind_vel -= edge_to_body(foil, flow)
-    normal_wake_ind = sum(foil.wake_ind_vel .* foil.normals, dims=1)'
-
-    # dmudt, old_mus = get_dmudt!(old_mus, foil, flow)
-    # dphidt, old_phis = get_dphidt!(old_phis, phi, flow)
-    #do the roll outide of this function, allows for iteration
-    dmudt = get_dt([foil.μs'; old_mus[1:2,:]],flow)
-    dphidt = get_dt([phi'; old_phis[1:2,:]],flow)
-    
-    qt = get_qt(foil)
-    qt .+= repeat((foil.σs)', 2, 1) .* foil.normals 
-    qt .-= foil.wake_ind_vel .*foil.tangents
-
-    p_s = sum((qt - foil.wake_ind_vel) .^ 2, dims=1) / 2.0
-    p_us = dmudt' + dphidt' - sum(([-flow.Uinf 0]' .+ foil.panel_vel) .* qt, dims=1) 
