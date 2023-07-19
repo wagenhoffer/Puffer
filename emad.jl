@@ -1,90 +1,6 @@
 include("../src/BemRom.jl")
 using Plots, CSV, DataFrames
 
-"""
-I have published a paper that covers a lot of the material implemented here. I haqve emailed that to you. 
-
-Skip the acoustics. 
-
-It talks about the traveling wave form, anguilliform is already implemented (the other is a few minutes to set up).
-There are three big non-dimensional numbers we care about variation of to make a surrogate of a "physical" swimmer. 
-The Strouhal number -> St = f*a0/U  and reduced frequency f* = fc/U and ND wavenumber k* = kc 
-here f is frequency, a0 is amplitude of motion, c is chord or length of the swimmer, k is the wavenumber of the wave 
-traveling down the chord of the swimmer (think λ if that helps) and U is the freestream velocity. 
-
-In my paper, I used the ranges of 0.25 <= f* <= 4 and 0.025 <= St <= 0.4 and 0.35 <= k* <= 2. You only need to adjust the values of 
-frequency and freestream to obtain the first two ranges and the third if an independent variable to adjust. The chord should not change from 1 meter (it plots nice) and the 
-a0 value is a physical measurement approximation. 
-
-They are you input parameters to start, you need to figure out how refined you need to go in order for the 
-approximation to work. We will talk about validation in the future. 
-
-I have placed a copy of the time_increment! function here with comments to explain what is a function of the inputs
-and what is a solution space. 
-
-function time_increment!(flow::FlowParams, foil::Foil, wake::Wake)
-    if flow.n != 1
-        move_wake!(wake, flow)   
-        release_vortex!(wake, foil)
-    end    
-    (foil)(flow) #does the kinematics of the foil and sets up the next time step to be solved 
-                 # this includes new panel positions, and the normals and tangents of the foil (input space)
-    
-    A, rhs, edge_body = make_infs(foil)
-    #A <- large dense influence matrix (input space)
-    #rhs <- velocity from the body onto itself and from the vortex wake onto the panels (input space)
-    #edgebody <- edge panel influence onto the panels (input space)
-    setσ!(foil, flow)   # velocity influences from motion of foil and freestream (input)
-    foil.wake_ind_vel = vortex_to_target(wake.xy, foil.col, wake.Γ, flow) 
-    # wake induced velocity (input)
-    normal_wake_ind = sum(foil.wake_ind_vel .* foil.normals, dims=1)' #linear alg
-    foil.σs -= normal_wake_ind[:] #linear alg
-    buff = edge_body * foil.μ_edge[1] #linear alg
-    foil.μs = A \ (-rhs*foil.σs-buff)[:]
-    # above we solve the system, this effectively tells us what vortices can be used to represent the foil
-    # the μs are the first (and possibly most important) of the output space variables
-    #the next two lines are taking the dynamic info we just obtained to make a static snapshot of the flow 
-    set_edge_strength!(foil)
-    cancel_buffer_Γ!(wake, foil)
-    #the next two funcs find what velocity is induced on the vortex particles in the wake (to define how they move)
-    body_to_wake!(wake, foil, flow)
-    wake_self_vel!(wake, flow)    
-    nothing
-end
-"""
- 
-
-
-"""
-function time_increment!(flow::FlowParams, foil::Foil, wake::Wake)
-    if flow.n != 1
-        move_wake!(wake, flow)
-        release_vortex!(wake, foil)
-    end
-    
-    (foil)(flow)
-    
-    A, rhs, edge_body = make_infs(foil)
-    setσ!(foil, flow)
-    foil.wake_ind_vel = vortex_to_target(wake.xy, foil.col, wake.Γ, flow)
-    normal_wake_ind = sum(foil.wake_ind_vel .* foil.normals, dims=1)'
-    foil.σs -= normal_wake_ind[:]
-    buff = edge_body * foil.μ_edge[1]
-    foil.μs = A \ (-rhs * foil.σs - buff)[:]
-    
-    set_edge_strength!(foil)
-    cancel_buffer_Γ!(wake, foil)
-    
-    body_to_wake!(wake, foil, flow)
-    wake_self_vel!(wake, flow)
-    
-    nothing
-end
-"""
-
-
-
-
 ang = deepcopy(defaultDict)
 ang[:N] = 64      #number of panels (elements) to discretize the foil
 ang[:Nt] = 64     #number of timesteps per period of motion
@@ -147,17 +63,28 @@ begin
     gif(movie, "handp.gif", fps=10)
 end
 
+function save_data(input_data, output_data, output_dir)
+    # Save input data
+    input_file = joinpath(output_dir, "input_data.csv")
+    CSV.write(input_file, input_data)
+
+    # Save output data
+    output_file = joinpath(output_dir, "output_data.csv")
+    CSV.write(output_file, output_data)
+end
+
+
 
 
 
 function run_simulations(output_dir)
     # Define parameter ranges
-    Strouhal_values = [0.1, 0.2, 0.3]  
-    reduced_freq_values = [0.1, 0.2, 0.3]  
-    wave_number_values = [0.1, 0.2, 0.3]  
+    Strouhal_values = [0.1, 0.2, 0.3]
+    reduced_freq_values = [0.1, 0.2, 0.3]
+    wave_number_values = [0.1, 0.2, 0.3]
 
-    input_data = DataFrame(St = Float64[], reduced_freq = Float64[], wave_number = Float64[], σ = Float64[], panel_velocity = Float64[])
-    output_data = DataFrame(mu = Float64[], pressure = Float64[])
+    allin = Vector{DataFrame}()
+    allout = Vector{DataFrame}()
 
     # Nested loops to vary parameters
     for St in Strouhal_values
@@ -168,37 +95,146 @@ function run_simulations(output_dir)
                 ang[:N] = 64
                 ang[:Nt] = 64
                 ang[:Ncycles] = 5 # number of cycles
+                ang[:Uinf] = 1.0
                 ang[:f] = reduced_freq * ang[:Uinf]
                 ang[:kine] = :make_ang
-                a0 = St * ang[:Uinf] / ang[:f]
-                ang[:motion_parameters] = a0
+                a0 = 0.1 #St * ang[:Uinf] / ang[:f]
+                ang[:motion_parameters] = [a0]
 
                 # Initialize Foil and Flow objects
-                foil, flow = init_params(;ang...)
+                foil, fp = init_params(; ang...)
                 wake = Wake(foil)
-                (foil)(flow)
+                (foil)(fp)
 
                 # Perform simulations and save results
                 old_mus, old_phis = zeros(3, foil.N), zeros(3, foil.N)
                 phi = zeros(foil.N)
-                for i in 1:flow.Ncycles * flow.N
-                    time_increment!(flow, foil, wake)
+                input_data = DataFrame(St = Float64[], reduced_freq = Float64[], wave_number = Float64[], σ = Matrix{Float64}, panel_velocity = Matrix{Float64})
+                output_data = DataFrame(mu = Float64[], pressure = Float64[])
+
+                for i in 1:fp.Ncycles * foil.N
+                    time_increment!(fp, foil, wake)
                     phi = get_phi(foil, wake)
-                    p = panel_pressure(foil, flow, old_mus, old_phis, phi)
+                    p = panel_pressure(foil, fp, old_mus, old_phis, phi)
                     old_mus = [foil.μs'; old_mus[1:2, :]]
                     old_phis = [phi'; old_phis[1:2, :]]
-                    
-                    # Store input and output data
-                    push!(input_data, (St = St, reduced_freq = reduced_freq, wave_number = wave_number, σ = foil.σ, panel_velocity = foil.U))
-                    push!(output_data, (mu = foil.μs[1], pressure = p[1]))
+
+                    if i == 1
+                        input_data = DataFrame(St = [St], reduced_freq = [reduced_freq], wave_number = [wave_number], σ = [foil.σs'], panel_velocity = [foil.panel_vel'])
+                        output_data = DataFrame(mu = [foil.μs'], pressure = [p'])
+                    else
+                        append!(input_data, DataFrame(St = [St], reduced_freq = [reduced_freq], wave_number = [wave_number], σ = [foil.σs'], panel_velocity = [foil.panel_vel']))
+                        append!(output_data, DataFrame(mu = [foil.μs'], pressure = [p']))
+                    end
                 end
+
+                push!(allin, input_data)
+                push!(allout, output_data)
             end
         end
     end
 
-    
-    CSV.write(joinpath(output_dir, "input_data.csv"), input_data)
-    CSV.write(joinpath(output_dir, "output_data.csv"), output_data)
+    input_data = vcat(allin...)
+    output_data = vcat(allout...)
+
+    save_data(input_data, output_data, output_dir)
 end
 
-run_simulations("output_directory")
+
+
+
+function init_flow(Nt)
+    # Initialize the flow object with the given parameters
+    return flow
+end
+
+
+
+function create_plot(output_dir)
+    # Load output data
+    output_file = joinpath(output_dir, "output_data.csv")
+    output_data = CSV.read(output_file, DataFrame)
+
+    # Extract relevant columns
+    μ_data = output_data.mu
+    pressure_data = output_data.pressure
+
+    # Create plot
+    t = collect(1:size(μ_data, 2))
+    plot(t, μ_data, label = "μ", xlabel = "Time", ylabel = "μ Value", lw = 2)
+    plot!(t, pressure_data, label = "Pressure", lw = 2)
+
+    # Save plot
+    plot_file = joinpath(output_dir, "simulation_plot.png")
+    savefig(plot_file)
+end
+
+
+
+
+
+output_dir = "path/to/output/directory"
+run_simulations(output_dir)
+input_data_file = joinpath(output_dir, "input_data.csv")
+output_data_file = joinpath(output_dir, "output_data.csv")
+input_data = CSV.read(input_data_file, DataFrame)
+output_data = CSV.read(output_data_file, DataFrame)
+
+#average_per_cycle(output_dir, foil)
+
+
+
+
+
+
+
+using Surrogates
+using Flux
+using Statistics
+using SurrogatesFlux
+
+#bounds are what we can sample from
+bounds = (St = (0.1, 0.3), reduced_freq = (0.1, 0.3), wave_number = (0.1, 0.3))
+#the sample will pull out a St,f,k tuple
+n_samples = 100
+rng = Random.default_rng()  # Create a random number generator
+x_s = [Tuple(x) for x in Iterators.partition(x_s, length(bounds))]  # Reshape x_s into a list of tuples
+# dataFrames
+x_train = [x[1] for x in x_s]  # Extract the first element (σs) from each tuple
+y_train = [x[2] for x in x_s]  # Extract the second element (μs) from each tuple
+# :N <- number of panels for our swimmer
+N_panels = 64 #ang[:N]
+# Perceptron with one hidden layer of 20 neurons.
+N = 10
+using Flux
+
+# Define the model architecture
+model = Chain(
+    Dense(1, 32, relu),
+    Dense(32, 16, relu),
+    Dense(16, 8),
+    Dense(8, 1)
+)
+
+# Define the loss function
+loss(x, y) = Flux.mse(model(x), y)
+
+# Define the optimizer
+optimizer = Descent(0.1)
+
+# Define the number of epochs
+n_epochs = 50
+
+# Reshape the input data
+x_train = reshape(x_train, (size(x_train, 1), 1))
+y_train = reshape(y_train, (size(y_train, 1), 1))
+
+# Train the model
+for epoch in 1:n_epochs
+    Flux.train!(loss, Flux.params(model), [(x_train, y_train)], optimizer)
+end
+
+# Testing the new model
+x_test = [sample(1, bounds..., SobolSample())[1] for _ in 1:length(x_train)]
+x_test_reshaped = reshape(x_test, (size(x_test, 1), 1))
+test_error = mean(abs2, Flux.predict(model, x_test_reshaped) .- f(x_test))
