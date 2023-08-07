@@ -2,7 +2,6 @@
 """
     (foil::Foil)(fp::FlowParams)
 
-Use a functor to advance the time-step
 """
 function (foil::Foil)(flow::FlowParams)
     #perform kinematics
