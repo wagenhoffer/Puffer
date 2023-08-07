@@ -36,8 +36,7 @@ function moored_teardrop()
 
 	foil, flow, wake, coeffs = run_sim(; moored...)
 	coeffs ./= (0.5*flow.Uinf^2)
-	# plot_current(foil, wake)
-	# plot_coeffs(coeffs/(0.5*flow.Uinf^2),flow)
+
 
 	# Change thickness to 0.1%
 	#pure heaving compare - Quinn, moored
@@ -153,6 +152,9 @@ function young17()
 	q∞ = 0.5*young[:Uinf]^2
 	ks = [2 4 8].|>Float64
 	cps = zeros(length(ks), young[:N])
+	young[:motion_parameters] = [0.0, 0.0]
+	young[:f] = young[:Uinf]/π
+	foil, flow = init_params(;young...)
 	for (i,k) in enumerate(ks)
 		
 		θ0 = deg2rad(0)

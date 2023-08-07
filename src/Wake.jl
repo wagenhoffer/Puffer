@@ -76,11 +76,11 @@ function body_to_wake!(wake::Wake, foil::Foil,flow::FlowParams)
     nothing
 end
 
-function vortex_to_target(sources, targets, Γs, flow)
+function vortex_to_target(sources::Matrix{T}, targets, Γs, flow) where T <:Real
     ns = size(sources)[2]
     nt = size(targets)[2]
-    vels = zeros((2, nt))
-    vel = zeros(nt)
+    vels = zeros(T, (2, nt))
+    vel = zeros(T, nt)
     for i = 1:ns
         dx = targets[1, :] .- sources[1, i]
         dy = targets[2, :] .- sources[2, i]
