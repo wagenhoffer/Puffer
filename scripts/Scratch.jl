@@ -36,7 +36,7 @@ begin
         f = plot_current(foil, wake;window=win)
         f
     end
-    gif(movie, "handp.gif", fps=10)
+    gif(movie, "./images/handp.gif", fps=10)
 end
 
 begin
@@ -390,4 +390,111 @@ end
         end
 
 
-# end
+end
+
+
+###MESSING AROUND WITH Frequency while in motion###
+begin
+    #scripting
+    upm = deepcopy(defaultDict)
+    upm[:Nt]        = 64
+    upm[:N]         = 64
+    upm[:Ncycles]   = 3    
+    upm[:Uinf]      = 1.0
+    upm[:kine]      = :make_ang
+    upm[:pivot]     = 0.0
+    upm[:foil_type] = :make_naca
+    upm[:thick]     = 0.12
+    upm[:f] = 1.0
+    upm[:k] = 1.0
+  
+
+    foil, flow = init_params(;upm...)
+    wake = Wake(foil)
+    Us = zeros(2, flow.Ncycles*flow.N)
+    U = (foil)(flow)
+    #data containers
+    old_mus, old_phis = zeros(3,foil.N), zeros(3,foil.N)   
+    phi = zeros(foil.N)
+    coeffs = zeros(4,flow.Ncycles*flow.N)
+    ps = zeros(foil.N ,flow.Ncycles*flow.N)
+
+    anim = Animation()    
+    for i = 1:flow.Ncycles*flow.N
+        if flow.n != 1            
+            move_wake!(wake, flow)   
+            release_vortex!(wake, foil)
+        end    
+        if flow.n%flow.N > flow.N÷4
+            foil.f += 0.02 #(rand()[1] -0.5) / 100.
+        else
+            foil.f -= 0.02 #(rand()[1] -0.5) / 100.
+        end
+        @show foil.f
+        (foil)(flow)
+        A, rhs, edge_body = make_infs(foil)
+        A[getindex.(A .== diag(A))] .= 0.5
+        setσ!(foil, flow)    
+        foil.wake_ind_vel = vortex_to_target(wake.xy, foil.col, wake.Γ, flow)
+        normal_wake_ind = sum(foil.wake_ind_vel .* foil.normals, dims=1)'
+        foil.σs -= normal_wake_ind[:]
+        buff = edge_body * foil.μ_edge[1]
+        foil.μs = A \ (-rhs*foil.σs-buff)[:]
+        set_edge_strength!(foil)
+        cancel_buffer_Γ!(wake, foil)
+        body_to_wake!(wake, foil, flow)
+        wake_self_vel!(wake, flow)    
+        phi =  get_phi(foil, wake)                                   
+        p = panel_pressure(foil, flow,  old_mus, old_phis, phi)        
+        
+        old_mus  = [foil.μs'; old_mus[1:2,:]]
+        old_phis = [phi'; old_phis[1:2,:]]
+        coeffs[:,i] = get_performance(foil, flow, p)
+        ps[:,i] = p
+        
+        f = plot_current(foil, wake)
+        plot!(f, ylims=(-1,1))
+        plot!(title="$(U)")
+        frame(anim, f)
+    end
+    gif(anim, "./images/self_prop_ang.gif", fps=10)
+end
+
+
+
+upm = deepcopy(defaultDict)
+upm[:Nt]        = 64
+upm[:N]         = 64
+upm[:Ncycles]   = 2    
+upm[:Uinf]      = 1.0
+upm[:kine]      = :make_heave_pitch
+upm[:pivot]     = 0.0
+upm[:foil_type] = :make_naca
+upm[:thick]     = 0.12
+upm[:f] = 1.0
+h0 = 0.0
+θ0 = deg2rad(0)	
+upm[:motion_parameters] = [h0, θ0]
+
+foil, flow = init_params(;upm...)
+(foil)(flow)
+bearing = sum(foil.normals[:,foil.N÷2:foil.N÷2+1], dims =2 )/2.0
+@show bearing
+θ0 = atan(bearing[2],bearing[1])
+pos = sum(foil.foil[:,foil.N÷2:foil.N÷2+1], dims =2 )/2.0
+quiver(foil.foil[1,:], foil.foil[2,:], quiver=(foil.normals[1,:],foil.normals[2,:]),aspect_ratio=:equal)
+quiver!(pos[1,:], pos[2,:], quiver=(bearing[1,:], bearing[2,:]))
+
+begin
+    a = plot()
+    for n= 1:flow.N
+        bearing = sum(foil.normals[:,foil.N÷2:foil.N÷2+1], dims =2)/2.0
+        θ0 = atan(bearing[2],bearing[1]) - π
+        @show θ0,2*pi*flow.Δt*n
+        rotate_about!(foil,turn-θ0)    
+        norms!(foil)
+        plot!(a, foil.foil[1,:], foil.foil[2,:], aspect_ratio=:equal, label="")      
+    end
+    a
+end
+turn = pi/7

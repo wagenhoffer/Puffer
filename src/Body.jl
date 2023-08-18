@@ -22,6 +22,9 @@ mutable struct Foil{T} <: Body
     ledge::Matrix{T} #leading edge panel 
     μ_ledge::Vector{T} #leading edge doublet strength
     pivot::T # where the foil pivots about as a fraction of chord
+    LE::Vector{T} #explicit position of leading edge
+    θ::T # orientation of foil
+    vel::Vector{T} #velocity of body <- self propelled systems
 end
 
 # NACA0012 Foil
@@ -251,10 +254,9 @@ function do_kinematics!(foils::Vector{Foil{T}}, flow::FlowParams) where T<:Real
     nothing
 end
 
-function rotate_about!(foil, θ)
-
+function rotate_about!(foil, θ; pivot=foil.pivot)
     foil.foil = ([foil._foil[1, :] .- foil.pivot foil._foil[2, :]] * rotation(θ))'
-    foil.foil[1, :] .+= foil.pivot 
+    foil.foil[1, :] .+= pivot 
     nothing
 end
 function rotate_about(foil, θ)

@@ -43,7 +43,7 @@ begin
         plot!(g, ylims=(-1,1))
         plot(f,g, layout = (2,1))        
     end
-    gif(movie,  "vortex_merging.gif", fps=10)
+    gif(movie,  "./images/vortex_merging.gif", fps=10)
 end
 
 

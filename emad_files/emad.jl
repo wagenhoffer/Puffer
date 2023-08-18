@@ -77,7 +77,8 @@ end
 
 
 
-function run_simulations(output_dir)
+# function run_simulations(output_dir)
+begin
     # Define parameter ranges
     Strouhal_values = [0.1, 0.2, 0.3]
     reduced_freq_values = [0.1, 0.2, 0.3]
@@ -140,15 +141,34 @@ function run_simulations(output_dir)
     save_data(input_data, output_data, output_dir)
 end
 
-
-
-
-function init_flow(Nt)
-    # Initialize the flow object with the given parameters
-    return flow
+n = length(input_data[:,:σ]) #a single time step
+N = ang[:N] #num elements
+X = zeros(N, n)
+DX = zeros(N,n)
+#start messing with DataDrivenDiffEq
+for i = 1:n
+    X[:,i] = input_data[:,:σ][i]
+    DX[:,i] = output_data[:,:mu][i]
 end
 
+using DataDrivenDiffEq
+prob = DiscreteDataDrivenProblem(X[:,:512],DX[:,1:512])
+prob= ContinuousDataDrivenProblem(X[:,:],DX[:,:])
+prob = ContinuousDataDrivenProblem(reshape(X, (1,length(X))), reshape(DX, (1,length(DX))))
+out = solve(prob, DMDSVD())
 
+using SymbolicRegression
+using DataDrivenSR
+
+eqsearch_options = SymbolicRegression.Options(binary_operators = [+, *],
+                                              loss = L1DistLoss(),
+                                              verbosity = -1, progress = false, npop = 30,
+                                              timeout_in_seconds = 60.0)
+
+alg = EQSearch(eq_options = eqsearch_options)
+res = solve(prob, alg, options = DataDrivenCommonOptions(maxiters = 100))
+
+plot(prob)
 
 function create_plot(output_dir)
     # Load output data
@@ -173,7 +193,7 @@ end
 
 
 
-output_dir = "path/to/output/directory"
+output_dir = "./data/"
 run_simulations(output_dir)
 input_data_file = joinpath(output_dir, "input_data.csv")
 output_data_file = joinpath(output_dir, "output_data.csv")
@@ -192,28 +212,31 @@ using Surrogates
 using Flux
 using Statistics
 using SurrogatesFlux
+using Random
 
 #bounds are what we can sample from
 bounds = (St = (0.1, 0.3), reduced_freq = (0.1, 0.3), wave_number = (0.1, 0.3))
 #the sample will pull out a St,f,k tuple
 n_samples = 100
-rng = Random.default_rng()  # Create a random number generator
+rng = Random.default_rng(38)  # Create a random number generator
 x_s = [Tuple(x) for x in Iterators.partition(x_s, length(bounds))]  # Reshape x_s into a list of tuples
 # dataFrames
 x_train = [x[1] for x in x_s]  # Extract the first element (σs) from each tuple
 y_train = [x[2] for x in x_s]  # Extract the second element (μs) from each tuple
+x_train = input_data.σ
+y_train = output_data.mu
 # :N <- number of panels for our swimmer
 N_panels = 64 #ang[:N]
-# Perceptron with one hidden layer of 20 neurons.
-N = 10
-using Flux
 
 # Define the model architecture
 model = Chain(
-    Dense(1, 32, relu),
+    Dense(ang[:N], 32, relu),
     Dense(32, 16, relu),
-    Dense(16, 8),
-    Dense(8, 1)
+    Dense(16, 8, relu),
+    Dense(8, 16, relu),
+    Dense(16,32, relu),
+    Dense(32, ang[:N], relu), 
+    x -> reshape(x, (1, ang[:N]))
 )
 
 # Define the loss function
@@ -229,6 +252,13 @@ n_epochs = 50
 x_train = reshape(x_train, (size(x_train, 1), 1))
 y_train = reshape(y_train, (size(y_train, 1), 1))
 
+##NATE##
+lower_bound = [bound[1] for bound in bounds]
+upper_bound = [bound[2] for bound in bounds]
+neural = NeuralSurrogate(x_train, y_train, lower_bound, upper_bound, model = model, n_echos = 10)
+surrogate_optimize(schaffer, SRBF(), lower_bound, upper_bound, neural, SobolSample(), maxiters=20, num_new_samples=10)
+##NATE##
+
 # Train the model
 for epoch in 1:n_epochs
     Flux.train!(loss, Flux.params(model), [(x_train, y_train)], optimizer)
@@ -238,3 +268,27 @@ end
 x_test = [sample(1, bounds..., SobolSample())[1] for _ in 1:length(x_train)]
 x_test_reshaped = reshape(x_test, (size(x_test, 1), 1))
 test_error = mean(abs2, Flux.predict(model, x_test_reshaped) .- f(x_test))
+sample(10, lower_bound, upper_bound, SobolSample())
+
+input_data[St=0.1,:]
+
+
+#fix k, St, and f
+# then sample on that data, train, test. 
+#after that, roll back to allow for mutation on k, St, f
+
+id = input_data
+σs =  id[(id.St .== 0.1) .& (id.reduced_freq .== 0.1) .& (id.wave_number .== 0.1), :σ]
+#output isn't labeled?
+μs =  output_data[(id.St .== 0.1) .& (id.reduced_freq .== 0.1) .& (id.wave_number .== 0.1), :mu]
+model.(σs')
+
+bounds = (1, 320)
+#inline updates the model, should be a !
+neural = NeuralSurrogate(σs, μs, bounds[1], bounds[2], model = model, n_echos = 10)
+#work on how to make a proxy function for input to output 
+getμ(x) = μs[x]
+surrogate_optimize(getμ, SRBF(), bounds[1],  bounds[2], neural, SobolSample(), maxiters=20, num_new_samples=10)
+
+
+using DataDrivenDMD

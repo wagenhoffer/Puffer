@@ -32,7 +32,7 @@ begin
 end
 
 begin
-    """fig 5.11 ωcU∞ = 4.3 h =0.018"""
+    """fig 5.12 ωcU∞ = 17.0  h =0.018"""
 	teng = deepcopy(defaultDict)
 	teng[:Nt] = 64
 	teng[:N] = 64

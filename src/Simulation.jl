@@ -51,6 +51,7 @@ function run_sim(; kwargs...)
     (foil)(flow)
     for i = 1:steps
         A, rhs, edge_body = make_infs(foil)
+        A[getindex.(A .== diag(A))] .= 0.5
         setσ!(foil, flow)
         foil.wake_ind_vel = vortex_to_target(wake.xy, foil.col, wake.Γ, flow)
         normal_wake_ind = sum(foil.wake_ind_vel .* foil.normals, dims=1)'
@@ -114,7 +115,10 @@ function time_increment!(flow::FlowParams, foil::Foil, wake::Wake)
     normal_wake_ind = sum(foil.wake_ind_vel .* foil.normals, dims=1)'
     foil.σs -= normal_wake_ind[:]
     buff = edge_body * foil.μ_edge[1]
+    # prob = LinearProblem(A, (-rhs*foil.σs-buff)[:])
     foil.μs = A \ (-rhs*foil.σs-buff)[:]
+    # sol = solve(prob)
+    # foil.μs = sol.u
     set_edge_strength!(foil)
     cancel_buffer_Γ!(wake, foil)
     body_to_wake!(wake, foil, flow)

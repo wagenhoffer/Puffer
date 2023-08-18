@@ -42,7 +42,13 @@ function init_params(; kwargs...)
 
 	edge_vec = Uinf * Δt * [(txty[1, end] - txty[1, 1]), (txty[2, end] - txty[2, 1])] .|> T
 	edge = [foil[:, end] (foil[:, end] .+ 0.5 * edge_vec) (foil[:, end] .+ 1.5 * edge_vec)]
-	            #  kine, f,    k,             N,    _foil,    foil ,       col,          σs,          μs, edge,   μ_edge,chord,normals, tangents, panel_lengths, panbel_vel, wake_ind_vel, ledge, μ_ledge
-	foil = Foil{T}(kine, T(f), T(kwargs[:k]), N, foil, copy(foil), col, zeros(T, N), zeros(T, N), edge, zeros(T, 2), 1, nxny, txty, ll[:], zeros(size(nxny)),zeros(size(nxny)),zeros(T, 3,2),zeros(T,2), T(kwargs[:pivot]))
+	            #  kine, f,    k,             N, _foil, foil ,     col,  σs,          
+	foil = Foil{T}(kine, T(f), T(kwargs[:k]), N, foil, copy(foil), col, zeros(T, N), 
+				# μs,          edge, μ_edge,     chord, normals, tangents, panel_lengths,
+				  zeros(T, N), edge, zeros(T, 2), T(1), nxny,   txty,           ll[:], 
+				#   pan_vel,         wake_ind_vel,      ledge,         μ_ledge,    pivot,
+				  zeros(size(nxny)), zeros(size(nxny)), zeros(T, 3,2), zeros(T,2), T(kwargs[:pivot]), 
+				#   LEpos,    θ,  body vel
+				  zeros(T,2), T(0.0),	zeros(T,2))
     foil, fp
 end

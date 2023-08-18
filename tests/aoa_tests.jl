@@ -33,8 +33,8 @@ function aoas()
 		@show gregComp[:aoa]
 		foil, flow, wake, perf = run_sim(; gregComp...)
 		coeffs[i] = perf[2]
-		a = plot_current(foil, wake)
-		a
+		# a = plot_current(foil, wake)
+		# a
 	end
 	#normalize the coefficients
 	coeffs ./= (0.5 * gregComp[:Uinf]^2)
@@ -88,7 +88,7 @@ begin
 		plot!(ylim=(-1.5,5.0))
 		f
 	end
-	gif(movie, "aoa.gif", fps = 2)
+	gif(movie, "./images/aoa.gif", fps = 2)
 end
 
 
