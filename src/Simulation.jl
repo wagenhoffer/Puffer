@@ -3,6 +3,8 @@
     (foil::Foil)(fp::FlowParams)
 
 """
+###TODO:NATE
+# (foil::Foil)(fp::FlowParams) = _propel(foil,flow)
 function (foil::Foil)(flow::FlowParams)
     #perform kinematics
     if typeof(foil.kine) == Vector{Function}
@@ -109,7 +111,7 @@ function time_increment!(flow::FlowParams, foil::Foil, wake::Wake)
     (foil)(flow)
     
     A, rhs, edge_body = make_infs(foil)
-    A[getindex.(A .== diag(A))] .= 0.5
+    # A[getindex.(A .== diag(A))] .= 0.5
     setσ!(foil, flow)    
     foil.wake_ind_vel = vortex_to_target(wake.xy, foil.col, wake.Γ, flow)
     normal_wake_ind = sum(foil.wake_ind_vel .* foil.normals, dims=1)'

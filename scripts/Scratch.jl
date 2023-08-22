@@ -7,7 +7,7 @@ using Plots
 heave_pitch = deepcopy(defaultDict)
 heave_pitch[:N] = 64
 heave_pitch[:Nt] = 64
-heave_pitch[:Ncycles] = 25
+heave_pitch[:Ncycles] = 2
 heave_pitch[:f] = 1.
 heave_pitch[:Uinf] = 1
 heave_pitch[:kine] = :make_heave_pitch

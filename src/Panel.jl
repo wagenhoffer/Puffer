@@ -18,10 +18,10 @@ function get_panel_vels(foil::Foil, fp::FlowParams)
     col = get_mdpts(foil._foil)
 
     if typeof(foil.kine) == Vector{Function}
-        theta(t) = foil.kine[1](foil.f, t, - π / 2)
-        heave(t) = foil.kine[2](foil.f, t)
-        dx(t) = foil._foil[1, :] * cos(theta(t)) - foil._foil[2, :] * sin(theta(t))
-        dy(t) = foil._foil[1, :] * sin(theta(t)) + foil._foil[2, :] * cos(theta(t)) .+ heave(t)
+        theta(t) = foil.kine[2](foil.f, t, - π / 2)
+        heave(t) = foil.kine[1](foil.f, t)
+        dx(t) = col[1, :] * cos(theta(t)) - col[2, :] * sin(theta(t))
+        dy(t) = col[1, :] * sin(theta(t)) + col[2, :] * cos(theta(t)) .+ heave(t)
         vels = [ForwardDiff.derivative(t -> dx(t), _t), ForwardDiff.derivative(t -> dy(t), _t)]
     else
         vy = ForwardDiff.derivative(t -> foil.
@@ -177,8 +177,8 @@ end
 function panel_pressure(foil::Foil, flow,  old_mus, old_phis, phi)
     # foil.wake_ind_vel += edge_to_body(foil, flow)
 
-    dmudt = get_dt([foil.μs'; old_mus[1:2,:]],flow)
-    dphidt = get_dt([phi'; old_phis[1:2,:]],flow)
+    dmudt  = get_dt([foil.μs'; old_mus[1:2,:]], flow)
+    dphidt = get_dt([phi'; old_phis[1:2,:]], flow)
     
     qt = get_qt(foil)
     qt .+= repeat(foil.σs', 2, 1) .* foil.normals

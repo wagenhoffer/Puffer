@@ -147,7 +147,7 @@ function spalarts_prune!(wake::Wake, flow::FlowParams, foil::Foil; keep=0)
     # magic numbers from Spalart paper
     V0 = 10e-4*flow.Uinf
     D0 = 0.1*foil.chord
-
+    te = foil.foil[:,1]
     ds = sqrt.(sum(abs2,wake.xy .- te, dims=1))
     zs = sqrt.(sum(wake.xy.^2, dims=1))
 
