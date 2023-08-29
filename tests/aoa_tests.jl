@@ -30,7 +30,7 @@ function aoas()
 
 	for i ∈ 1:size(gregory)[1]
 		gregComp[:aoa] = -(gregory[i, 1] * pi / 180)
-		@show gregComp[:aoa]
+		# @show gregComp[:aoa]
 		foil, flow, wake, perf = run_sim(; gregComp...)
 		coeffs[i] = perf[2]
 		# a = plot_current(foil, wake)
@@ -108,6 +108,7 @@ begin
 	alphas = [0, 4, 8]
 	cps = zeros(size(alphas)[1], quinn[:N])
 	q∞ = 0.5*quinn[:Uinf]^2
+	foil, flow = init_params(;quinn...)
 	for i ∈ axes(alphas,1)
 		quinn[:aoa] = -(alphas[i] * pi / 180)
 		@show quinn[:aoa]
