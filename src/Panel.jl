@@ -173,6 +173,14 @@ function setσ!(foil::Foil, flow::FlowParams;)
               (foil.panel_vel[2, :]) .* foil.normals[2, :]
     nothing
 end
+function turn_σ!(foil::Foil,flow::FlowParams, turn)
+    ff = get_mdpts(([foil._foil[1, :] .- foil.pivot  foil._foil[2, :] .+  
+        foil.kine.(foil._foil[1, :], foil.f, foil.k, flow.n * flow.Δt)] * rotation(-turn))') .+ foil.LE
+    vel = (foil.col - ff)./flow.Δt 
+    foil.σs += vel[1, :] .* foil.normals[1, :] +
+               vel[2, :] .* foil.normals[2, :]
+    nothing
+end
 
 function panel_pressure(foil::Foil, flow,  old_mus, old_phis, phi)
     # foil.wake_ind_vel += edge_to_body(foil, flow)

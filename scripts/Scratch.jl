@@ -1,6 +1,5 @@
 include("../src/BemRom.jl")
 
-using SpecialFunctions
 using Plots
 
 

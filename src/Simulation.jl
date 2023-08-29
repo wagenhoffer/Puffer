@@ -4,28 +4,69 @@
 
 """
 ###TODO:NATE
-# (foil::Foil)(fp::FlowParams) = _propel(foil,flow)
-function (foil::Foil)(flow::FlowParams)
-    #perform kinematics
+(foil::Foil)(fp::FlowParams) = _propel(foil,flow)
+
+function _propel(foil::Foil,flow::FlowParams; forces=nothing, U = [0.0, 0.0], mass = 0.1, turnto=0.0, self_prop= false)
+    #only effects the position of the LE with the forces defining the new velocity of self-propellsion
+    #perform kinematics    
+     
+    if isnothing(forces)
+        forces = zeros(4)
+    end
+    # foil.θ -=  turn
+    foil.θ =  turnto
+
+    # xle1 = xle + 0.5*(U1 + U)*flow.Δt
+    if self_prop
+        #force, lift,-> thrust<-, power; only thrust
+        accel = -forces[3:-1:2]/mass
+        U1 =  accel*flow.Δt 
+        Δxy = 0.5*(U + U1)*flow.Δt        
+    else
+        U1 = nothing
+        Δxy = flow.Uinf .*flow.Δt
+    end
+    xle1 =  [cos(foil.θ+π), sin(foil.θ+π)].*Δxy     
+    foil.LE += xle1[:]
     if typeof(foil.kine) == Vector{Function}
         h = foil.kine[1](foil.f, flow.n * flow.Δt)
         θ = foil.kine[2](foil.f, flow.n * flow.Δt, -π/2)
-        rotate_about!(foil, θ)
-        foil.foil[2, :] .+= h
-        #Advance the foil in flow
-        foil.foil .+= [-flow.Uinf, 0] .* flow.Δt .* flow.n
-    else
-        foil.foil[2, :] = foil._foil[2, :] .+ foil.kine.(foil._foil[1, :], foil.f, foil.k, flow.n * flow.Δt)
-        #Advance the foil in flow
-        foil.foil .+= [-flow.Uinf, 0] .* flow.Δt
+        rotate_about!(foil, θ + foil.θ)
+        hframe = rotation(foil.θ)*[0 h]'
+        foil.foil .+= hframe 
+    else                
+        foil.foil = ([foil._foil[1, :] .- foil.pivot  foil._foil[2, :].+  foil.kine.(foil._foil[1, :], foil.f, foil.k, flow.n * flow.Δt)] 
+                     * rotation(-foil.θ))'
+        
     end
+    foil.foil .+= foil.LE
     norms!(foil)
     set_collocation!(foil)
     move_edge!(foil, flow)
-    flow.n += 1
+    flow.n += 1    
+    U1
 end
 
 
+# function (foil::Foil)(flow::FlowParams)
+#     #perform kinematics
+#     if typeof(foil.kine) == Vector{Function}
+#         h = foil.kine[1](foil.f, flow.n * flow.Δt)
+#         θ = foil.kine[2](foil.f, flow.n * flow.Δt, -π/2)
+#         rotate_about!(foil, θ)
+#         foil.foil[2, :] .+= h
+#         #Advance the foil in flow
+#         foil.foil .+= [-flow.Uinf, 0] .* flow.Δt .* flow.n
+#     else
+#         foil.foil[2, :] = foil._foil[2, :] .+ foil.kine.(foil._foil[1, :], foil.f, foil.k, flow.n * flow.Δt)
+#         #Advance the foil in flow
+#         foil.foil .+= [-flow.Uinf, 0] .* flow.Δt
+#     end
+#     norms!(foil)
+#     set_collocation!(foil)
+#     move_edge!(foil, flow)
+#     flow.n += 1
+# end
 """
     run_sim(; steps = flow.N*10, aoa = rotate(-0*pi/180)')
 
