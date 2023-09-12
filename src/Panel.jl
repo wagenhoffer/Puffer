@@ -5,8 +5,6 @@ source_inf(x1, x2, z) = (x1 * log(x1^2 + z^2) - x2 * log(x2^2 + z^2) - 2 * (x1 -
 
 doublet_inf(x1, x2, z) = -(mod2pi(atan(z, x2)) - mod2pi(atan(z, x1))) / (2π)
 
-get_mdpts(foil) = (foil[:, 2:end] + foil[:, 1:end-1]) ./ 2
-
 """
     get_panel_vels(foil::Foil,fp::FlowParams)
 
@@ -167,12 +165,14 @@ velocity from free stream
 velocity from motion 
 Tack on the wake influence outside of this function
 """
-function setσ!(foil::Foil, flow::FlowParams;)
-    get_panel_vels!(foil, flow)
-    foil.σs = (-flow.Uinf .+ foil.panel_vel[1, :]) .* foil.normals[1, :] +
+function setσ!(foil::Foil, flow::FlowParams; U_sp = nothing)
+    bod_vel = isnothing(U_sp) ? -flow.Uinf : U_sp
+    get_panel_vels!(foil, flow)    
+    foil.σs = (bod_vel .+ foil.panel_vel[1, :]) .* foil.normals[1, :] +
               (foil.panel_vel[2, :]) .* foil.normals[2, :]
     nothing
 end
+
 function turn_σ!(foil::Foil,flow::FlowParams, turn)
     ff = get_mdpts(([foil._foil[1, :] .- foil.pivot  foil._foil[2, :] .+  
         foil.kine.(foil._foil[1, :], foil.f, foil.k, flow.n * flow.Δt)] * rotation(-turn))') .+ foil.LE
@@ -182,9 +182,8 @@ function turn_σ!(foil::Foil,flow::FlowParams, turn)
     nothing
 end
 
-function panel_pressure(foil::Foil, flow,  old_mus, old_phis, phi)
-    # foil.wake_ind_vel += edge_to_body(foil, flow)
-
+function panel_pressure(foil::Foil, flow,  old_mus, old_phis, phi; U_sp = nothing)
+    bod_vel = isnothing(U_sp) ? -flow.Uinf : U_sp
     dmudt  = get_dt([foil.μs'; old_mus[1:2,:]], flow)
     dphidt = get_dt([phi'; old_phis[1:2,:]], flow)
     
@@ -192,7 +191,8 @@ function panel_pressure(foil::Foil, flow,  old_mus, old_phis, phi)
     qt .+= repeat(foil.σs', 2, 1) .* foil.normals
     # qt .-= foil.wake_ind_vel
     p_s  = sum((qt  + foil.wake_ind_vel) .^ 2, dims=1) /2.0
-    p_us = dmudt' + dphidt' - sum(([-flow.Uinf; 0] .+ foil.panel_vel) .* qt, dims=1) 
+   
+    p_us = dmudt' + dphidt' - sum(([bod_vel; 0] .+ foil.panel_vel) .* qt, dims=1) 
     # Calculate the total pressure coefficient
     """
     ∫∞→Px1 d(∇×Ψ)/dt dC + dΦ/dt|body - (VG + VGp + (Ωxr))⋅∇(Φ + ϕ) + 1/2||∇Φ +(∇×Ψ)|^2  = Pinf - Px1 /ρ

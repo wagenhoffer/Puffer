@@ -4,7 +4,7 @@
 
 """
 ###TODO:NATE
-(foil::Foil)(fp::FlowParams) = _propel(foil,flow)
+(foil::Foil)(flow::FlowParams) = _propel(foil,flow)
 
 function _propel(foil::Foil,flow::FlowParams; forces=nothing, U = [0.0, 0.0], mass = 0.1, turnto=0.0, self_prop= false)
     #only effects the position of the LE with the forces defining the new velocity of self-propellsion
@@ -94,7 +94,7 @@ function run_sim(; kwargs...)
     (foil)(flow)
     for i = 1:steps
         A, rhs, edge_body = make_infs(foil)
-        A[getindex.(A .== diag(A))] .= 0.5
+        # A[getindex.(A .== diag(A))] .= 0.5
         setσ!(foil, flow)
         foil.wake_ind_vel = vortex_to_target(wake.xy, foil.col, wake.Γ, flow)
         normal_wake_ind = sum(foil.wake_ind_vel .* foil.normals, dims=1)'

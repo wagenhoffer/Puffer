@@ -2,8 +2,5 @@
 *.gif
 # Portable Network Graphics
 *.png
-
-
 #CSV files for data storage
 *.csv
-
