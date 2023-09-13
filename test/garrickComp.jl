@@ -1,8 +1,10 @@
-# using BemRom
-include("../src/BemRom.jl")
+using BemRom
+
 using SpecialFunctions
 using Statistics
 using Plots
+using Test
+using LinearAlgebra
 
 theo(k) = 1im * hankelh1(1, k) / (hankelh1(0, k) + 1im * hankelh1(1, k))
 
@@ -18,10 +20,10 @@ function plot_coeffs(coeffs, flow)
 end
 
 
-function moored_teardrop()
+function moored_teardrop(;Nt = 64, N = 64)
 	moored = deepcopy(defaultDict)
-	moored[:Nt] = 64
-	moored[:N] = 64
+	moored[:Nt] = Nt
+	moored[:N] = N
 
 	moored[:Ncycles] = 5
 	moored[:f] = 0.5
@@ -214,7 +216,7 @@ end
 	# Define a tolerance for the error
 	tolerance = 0.06 #<_ probably high
     # Perform the simulation
-    data, _ = moored_teardrop()
+    data, _= moored_teardrop()
     cl, cl_sim = data
     # Check the results against the experimental data
     @test length(cl) == length(cl_sim)    

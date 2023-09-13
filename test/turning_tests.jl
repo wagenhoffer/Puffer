@@ -7,8 +7,8 @@
 # This also directly informs how to augment foil.σ, as foil.panel_vel will just be a linear combination of the
 # kinematic signal vel and the discrete velocity, aka add them
 # '''
-# using BemRom
-include("../src/BemRom.jl") 
+using BemRom
+# include("../src/BemRom.jl") 
 
 begin
     #running a heave and pitch sim

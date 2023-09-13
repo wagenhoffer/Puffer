@@ -1,6 +1,4 @@
-include("../src/BemRom.jl")
-
-
+using BemRom
 using Plots
 
 
@@ -76,7 +74,7 @@ begin
     coeffs_on = gen_coeffs(heave_pitch, true)    
     coeffs_off = gen_coeffs(heave_pitch, false)    
     L2= norm(coeffs_on .-coeffs_off, 2)./norm(coeffs_on, 2)
-    L2
+    @test L2 < 1e-2
 end
 
 begin

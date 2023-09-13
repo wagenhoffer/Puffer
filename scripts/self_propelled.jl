@@ -1,4 +1,4 @@
-include("../src/BemRom.jl")
+using BemRom
 
 using Plots
 

@@ -13,3 +13,4 @@ using Test
 VISUALIZE = false
 include("aoa_tests.jl")
 include("garrickComp.jl")
+include("teng87_comparison.jl")

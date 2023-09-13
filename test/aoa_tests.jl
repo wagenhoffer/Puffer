@@ -1,5 +1,5 @@
-# using BemRom
-include("../src/BemRom.jl")
+using BemRom
+# include("../src/BemRom.jl")
 using Test
 using Plots
 gregory = [0.0943692 0.0257134

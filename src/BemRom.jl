@@ -28,6 +28,6 @@ module BemRom
     export set_ledge!, ledge_inf, get_μ!
 
     include("./Fence.jl")
-    export make_splines, foilsdf, minsmax
+    export make_splines, foilsdf, minsmax, sdf_fence
 
 end # module
