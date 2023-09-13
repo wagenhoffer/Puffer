@@ -161,18 +161,20 @@ end
 
 """ 
     setσ!(foil::Foil, wake::Wake,flow::FlowParams)
-
-induced velocity from vortex wake
+Outward normal velocity to enforce no penetration condition
+due to 
 velocity from free stream
 velocity from motion 
 Tack on the wake influence outside of this function
 """
-function setσ!(foil::Foil, flow::FlowParams;)
+function setσ!(foil::Foil, flow::FlowParams; U_b = nothing)
+    U_b = isnothing(U_b) ? flow.Uinf : U_b
     get_panel_vels!(foil, flow)
-    foil.σs = (-flow.Uinf .+ foil.panel_vel[1, :]) .* foil.normals[1, :] +
+    foil.σs = (-U_b .+ foil.panel_vel[1, :]) .* foil.normals[1, :] +
               (foil.panel_vel[2, :]) .* foil.normals[2, :]
     nothing
 end
+
 function turn_σ!(foil::Foil,flow::FlowParams, turn)
     ff = get_mdpts(([foil._foil[1, :] .- foil.pivot  foil._foil[2, :] .+  
         foil.kine.(foil._foil[1, :], foil.f, foil.k, flow.n * flow.Δt)] * rotation(-turn))') .+ foil.LE
@@ -182,17 +184,17 @@ function turn_σ!(foil::Foil,flow::FlowParams, turn)
     nothing
 end
 
-function panel_pressure(foil::Foil, flow,  old_mus, old_phis, phi)
-    # foil.wake_ind_vel += edge_to_body(foil, flow)
+function panel_pressure(foil::Foil, flow,  old_mus, old_phis, phi; U_b = nothing)
+    U_b = isnothing(U_b) ? -flow.Uinf : U_b
 
     dmudt  = get_dt([foil.μs'; old_mus[1:2,:]], flow)
     dphidt = get_dt([phi'; old_phis[1:2,:]], flow)
     
     qt = get_qt(foil)
     qt .+= repeat(foil.σs', 2, 1) .* foil.normals
-    # qt .-= foil.wake_ind_vel
+
     p_s  = sum((qt  + foil.wake_ind_vel) .^ 2, dims=1) /2.0
-    p_us = dmudt' + dphidt' - sum(([-flow.Uinf; 0] .+ foil.panel_vel) .* qt, dims=1) 
+    p_us = dmudt' + dphidt' - sum(([U_b; 0] .+ foil.panel_vel) .* qt, dims=1) 
     # Calculate the total pressure coefficient
     """
     ∫∞→Px1 d(∇×Ψ)/dt dC + dΦ/dt|body - (VG + VGp + (Ωxr))⋅∇(Φ + ϕ) + 1/2||∇Φ +(∇×Ψ)|^2  = Pinf - Px1 /ρ

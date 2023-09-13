@@ -3,29 +3,30 @@
     (foil::Foil)(fp::FlowParams)
 
 """
-###TODO:NATE
-(foil::Foil)(fp::FlowParams) = _propel(foil,flow)
+##TODO:NATE
+(foil::Foil)(flow::FlowParams) = _propel(foil,flow)
 
-function _propel(foil::Foil,flow::FlowParams; forces=nothing, U = [0.0, 0.0], mass = 0.1, turnto=0.0, self_prop= false)
+function _propel(foil::Foil,flow::FlowParams; forces = nothing, U = [0.0, 0.0], mass = 0.1, turnto = nothing, self_prop = false)
     #only effects the position of the LE with the forces defining the new velocity of self-propellsion
     #perform kinematics    
      
     if isnothing(forces)
         forces = zeros(4)
     end
-    # foil.θ -=  turn
-    foil.θ =  turnto
+    if !isnothing(turnto)
+        foil.θ =  turnto
+    end
 
-    # xle1 = xle + 0.5*(U1 + U)*flow.Δt
     if self_prop
         #force, lift,-> thrust<-, power; only thrust
         accel = -forces[3:-1:2]/mass
-        U1 =  accel*flow.Δt 
+        U1 =  U + accel*flow.Δt 
         Δxy = 0.5*(U + U1)*flow.Δt        
     else
         U1 = nothing
         Δxy = flow.Uinf .*flow.Δt
     end
+
     xle1 =  [cos(foil.θ+π), sin(foil.θ+π)].*Δxy     
     foil.LE += xle1[:]
     if typeof(foil.kine) == Vector{Function}
@@ -68,7 +69,7 @@ end
 #     flow.n += 1
 # end
 """
-    run_sim(; steps = flow.N*10, aoa = rotate(-0*pi/180)')
+   
 
 
 TBW
@@ -94,7 +95,7 @@ function run_sim(; kwargs...)
     (foil)(flow)
     for i = 1:steps
         A, rhs, edge_body = make_infs(foil)
-        A[getindex.(A .== diag(A))] .= 0.5
+
         setσ!(foil, flow)
         foil.wake_ind_vel = vortex_to_target(wake.xy, foil.col, wake.Γ, flow)
         normal_wake_ind = sum(foil.wake_ind_vel .* foil.normals, dims=1)'
@@ -126,7 +127,7 @@ function get_performance(foil, flow, p)
     force  = sum(dforce, dims=2)
     lift   = -force[2]
     thrust = force[1]
-    power  = sum(dpress, dims=1)[1]
+    power = sum(dpress, dims = 1)[1]
 
     [sum(sqrt.(force .^ 2)), 
      lift,    
@@ -152,16 +153,13 @@ function time_increment!(flow::FlowParams, foil::Foil, wake::Wake)
     (foil)(flow)
     
     A, rhs, edge_body = make_infs(foil)
-    # A[getindex.(A .== diag(A))] .= 0.5
+
     setσ!(foil, flow)    
     foil.wake_ind_vel = vortex_to_target(wake.xy, foil.col, wake.Γ, flow)
     normal_wake_ind = sum(foil.wake_ind_vel .* foil.normals, dims=1)'
     foil.σs -= normal_wake_ind[:]
     buff = edge_body * foil.μ_edge[1]
-    # prob = LinearProblem(A, (-rhs*foil.σs-buff)[:])
     foil.μs = A \ (-rhs*foil.σs-buff)[:]
-    # sol = solve(prob)
-    # foil.μs = sol.u
     set_edge_strength!(foil)
     cancel_buffer_Γ!(wake, foil)
     body_to_wake!(wake, foil, flow)
@@ -218,7 +216,7 @@ function time_increment!(flow::FlowParams, foils::Vector{Foil}, wake::Wake)
         ps[(i-1)*foils[i].N+1:i*foils[i].N] = p
         coeffs[i, : , 1] .= get_performance(foil, flow, p)
     end
-    old_mus = [μs'; old_mus[1:2,:]]
+    old_mus = [μs'; old_mus[1:2,:]]# prob = LinearProblem(A, (-rhs*foil.σs-buff)[:])
     old_phis = [phis'; old_phis[1:2,:]]
         
     move_wake!(wake, flow)
@@ -272,6 +270,7 @@ function roll_values!(oldvals, newval)
     oldvals[1, :] = newval
     oldvals    
 end
+
 function get_qt(foil::Foil)
     acc_lens = 0.5 * foil.panel_lengths[1:end-1] + 0.5 * foil.panel_lengths[2:end]
     acc_lens = [0; cumsum(acc_lens)]

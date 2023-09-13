@@ -236,10 +236,13 @@ function do_kinematics!(foils::Vector{Foil{T}}, flow::FlowParams) where T<:Real
             h = foil.kine[1](foil.f, flow.n * flow.Δt)
             θ = foil.kine[2](foil.f, flow.n * flow.Δt, -π/2)
             rotate_about!(foil, θ)
-            foil.foil[2, :] .+= h
+           
             #Advance the foil in flow
-            foil.foil[1,:] .+= le
+            # foil.foil[1,:] .+= le
+            foil.foil .+= foil.LE
+            foil.foil[2, :] .+= h
             foil.foil .+= [-flow.Uinf, 0] .* flow.Δt 
+            foil.LE = foil.foil[:, foil.N÷2 + 1]
             
         else
             foil.foil[2, :] = foil._foil[2, :] .+ foil.kine.(foil._foil[1, :], foil.f, foil.k, flow.n * flow.Δt)

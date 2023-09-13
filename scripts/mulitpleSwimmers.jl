@@ -4,21 +4,38 @@ using Plots
 begin  
     pos1 = deepcopy(defaultDict)
     pos1[:kine] = :make_heave_pitch
-    pos1[:motion_parameters] = [0.1, π/20]
+    pos1[:motion_parameters] = [0.0, -π/20]
     foil1, flow = init_params(;pos1...)
     # copy the first foil
     foil2 = deepcopy(foil1)
+    foil3 = deepcopy(foil1)
+    foil4 = deepcopy(foil1)
     #alter the second foil - absolute position
-    foil2.foil[1,:] .+= 1.5*foil1.chord
-    # foil2.f *= -1
-    foil2.Φ = pi/2
-    foil2.start = [minimum(foil2.foil[1,:]), 0.0]
+    foil2.foil[1,:] .+= 2.0*foil1.chord
+    foil2.LE = [minimum(foil2.foil[1,:]), 0.0]
     norms!(foil2)
     set_collocation!(foil2)
     move_edge!(foil2,flow)
     foil2.edge[1,end] = 2.0*foil2.edge[1,2] - foil2.edge[1,1]
+
+    foil3.foil[1,:] .+= 1.0*foil1.chord
+    foil3.foil[2,:] .+= 1.0
+    foil3.LE = [minimum(foil3.foil[1,:]), foil3.foil[2, (foil3.N ÷ 2 +1)]]
+    norms!(foil3)
+    set_collocation!(foil3)
+    move_edge!(foil3,flow)
+    foil3.edge[1,end] = 2.0*foil3.edge[1,2] - foil3.edge[1,1]
+
+    foil4.foil[1,:] .+= 1.0*foil1.chord
+    foil4.foil[2,:] .-= 1.0
+    foil4.LE = [minimum(foil4.foil[1,:]), foil4.foil[2,(foil4.N ÷ 2 +1)]]   
+    norms!(foil4)
+    set_collocation!(foil4)
+    move_edge!(foil4,flow)
+    foil4.edge[1,end] = 2.0*foil4.edge[1,2] - foil4.edge[1,1]
+
     #vector of foils
-    foils = [foil1, foil2]
+    foils = [foil1, foil2, foil3, foil4]
     @show typeof(foils)
 
     flow.Ncycles = 5
@@ -38,11 +55,25 @@ begin
     do_kinematics!(foils,flow)
 end
 
+function cancel_buffer_Γ!(wake::Wake, foils::Vector{Foil{T}}) where T <: Real
+    for (i, foil) in enumerate(foils)
+        wake.xy[:, i]= foil.edge[:,2]
+        wake.Γ[i] = -foil.μ_edge[end]
+    end
+
+end
+
+plt = plot()
+for f in foils
+    plot!(plt, f.foil[1,:],f.foil[2,:])
+end
+plt
+
 
 begin
     steps = flow.N * flow.Ncycles
 
-    movie = @animate for t  in 1:steps -11
+    movie = @animate for t  in 1:steps
         A, rhs, edge_body = make_infs(foils) #̌#CHECK
         [setσ!(foil, flow) for foil in foils] #CHECK
         σs = [] #CHECK
@@ -78,14 +109,14 @@ begin
         end
         old_mus = [μs'; old_mus[1:2,:]]
         old_phis = [phis'; old_phis[1:2,:]]        
-        wake.xy =  sdf_fence(wake, foils, flow)              
+        wake.xy =  sdf_fence(wake, foils, flow; mask=[0,1,0,0].|>Bool)              
         
         # move_wake!(wake, flow)
         for foil in foils
             release_vortex!(wake, foil)
         end
         do_kinematics!(foils,flow)
-        f = plot_current(foils, wake; window= (minimum(foils[2].foil[1,:])-0.25,maximum(foils[2].foil[1,:])+0.5))
+        f = plot_current(foils, wake; )
         # f = plot_current(foils, wake)
         # @show t
         f

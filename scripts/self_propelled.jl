@@ -2,58 +2,6 @@ include("../src/BemRom.jl")
 
 using Plots
 
-# modify functions
-function _propel(foil::Foil,flow::FlowParams; forces=nothing, U = [0.0, 0.0], mass = 0.1, turnto=0.0, self_prop= false)
-    #only effects the position of the LE with the forces defining the new velocity of self-propellsion
-    #perform kinematics    
-     
-    if isnothing(forces)
-        forces = zeros(4)
-    end
-    # foil.θ -=  turn
-    foil.θ =  turnto
-
-    # xle1 = xle + 0.5*(U1 + U)*flow.Δt
-    if self_prop
-        #force, lift,-> thrust<-, power; only thrust
-        accel = -forces[3:-1:2]/mass
-        U1 =  U + accel*flow.Δt
-        Δxy = U1*flow.Δt        
-    else
-        U1 = nothing
-        Δxy = flow.Uinf .*flow.Δt
-    end
-    xle1 =  [cos(foil.θ+π), sin(foil.θ+π)]*Δxy     
-    foil.LE += xle1[:]
-    if typeof(foil.kine) == Vector{Function}
-        h = foil.kine[1](foil.f, flow.n * flow.Δt)
-        θ = foil.kine[2](foil.f, flow.n * flow.Δt, -π/2)
-        rotate_about!(foil, θ + foil.θ)
-        hframe = rotation(foil.θ)*[0 h]'
-        foil.foil .+= hframe 
-    else                
-        foil.foil = ([foil._foil[1, :] .- foil.pivot  foil._foil[2, :].+  foil.kine.(foil._foil[1, :], foil.f, foil.k, flow.n * flow.Δt)] 
-                     * rotation(-foil.θ))'
-        
-    end
-    foil.foil .+= foil.LE
-    norms!(foil)
-    set_collocation!(foil)
-    move_edge!(foil, flow)
-    flow.n += 1    
-    U1
-end
-
-turn = 0.15
-ff = get_mdpts(([foil._foil[1, :] .- foil.pivot  foil._foil[2, :].+  foil.kine.(foil._foil[1, :], foil.f, foil.k, flow.n * flow.Δt)] 
-* rotation(-turn))') .+ foil.LE
-
-plot(ff[1,:],ff[2,:])
-plot!(foil.col[1,:], foil.col[2,:], aspect_ratio=:equal)
-plot((ff-foil.col)')
-
-
-
 """
     turn_σ!(foil::Foil,flow::FlowParams, turn)
 
@@ -73,7 +21,7 @@ begin
     upm = deepcopy(defaultDict)
     upm[:Nt]        = 64
     upm[:N]         = 64
-    upm[:Ncycles]   = 4   
+    upm[:Ncycles]   = 4 
     upm[:Uinf]      = 1.0
     upm[:kine]      = :make_ang
     upm[:pivot]     = 0.0
@@ -84,11 +32,11 @@ begin
   
 
     foil, flow = init_params(;upm...)
-    mass = 1e-3
-    
+    mass = 1e-1
+    turns = zeros(flow.Ncycles*flow.N)
     wake = Wake(foil)
     Us = zeros(2, flow.Ncycles*flow.N)
-    U = _propel(foil, flow;  U = [0.0, 0.0], mass = mass, turnto=trs[1])
+    U = _propel(foil, flow;  U = [0.0, 0.0], mass = mass, turnto=turns[1])
     #data containers
     old_mus, old_phis = zeros(3,foil.N), zeros(3,foil.N)   
     phi = zeros(foil.N)
@@ -96,7 +44,7 @@ begin
     ps = zeros(foil.N ,flow.Ncycles*flow.N)
     stop = π
     steps = flow.N*flow.Ncycles
-    trs = collect(foil.θ:stop/steps:stop).*0
+    turns = collect(foil.θ:stop/steps:stop).*0
     # trs = 0.0
     anim = Animation()    
     for i = 1:flow.Ncycles*flow.N
@@ -105,17 +53,24 @@ begin
             release_vortex!(wake, foil)
         end    
         if i == 1
-            U = _propel(foil, flow;  U = [0.0, 0.0], mass = mass, turnto=trs[i])
+            U = _propel(foil, flow;  U = [0.0, 0.0], mass = mass, turnto=turns[i])
             # Cast this to  2d vel
-            U = [0.0, 0.0]
+            U = [-1.0, 0.0]
         else
-            U = _propel(foil, flow; forces= coeffs[:,i-1], U = U, mass = mass, turnto=trs[i], self_prop = true)
+            U = _propel(foil, flow; forces= coeffs[:,i-1], U = U, mass = mass, turnto=turns[i], self_prop = true)
             # U = (foil)(flow)
         end
-        # Us[:,i] .= U
+        # @show U
+        Us[:,i] .= U
+        U_bx = -U[1]
         A, rhs, edge_body = make_infs(foil)
 
-        setσ!(foil, flow)    
+        setσ!(foil, flow; U_b = U_bx)    
+        get_panel_vels!(foil, flow)
+        foil.σs = (-U[1] .+ foil.panel_vel[1, :]) .* foil.normals[1, :] +
+                  (foil.panel_vel[2, :]) .* foil.normals[2, :]
+        
+        
         # σ is set - now pull in the information from the turn radius
         # turn_σ!(foil, flow, trs[i])
         foil.wake_ind_vel = vortex_to_target(wake.xy, foil.col, wake.Γ, flow)
@@ -128,11 +83,13 @@ begin
         body_to_wake!(wake, foil, flow)
         wake_self_vel!(wake, flow)    
         phi =  get_phi(foil, wake)                                   
-        p = panel_pressure(foil, flow,  old_mus, old_phis, phi)        
+        p = panel_pressure(foil, flow,  old_mus, old_phis, phi; U_b = U_bx)        
         
         old_mus  = [foil.μs'; old_mus[1:2,:]]
         old_phis = [phi'; old_phis[1:2,:]]
         coeffs[:,i] = get_performance(foil, flow, p)
+        ###FAKE COEFF Thrust
+        coeffs[3,i] = 0.2.*cos.(4π.*foil.f.*  i *flow.Δt )
         ps[:,i] = p
         f = plot_current(foil, wake)
         plot!(f, ylims=(-1,1))
@@ -140,6 +97,25 @@ begin
         frame(anim, f)
     end
     gif(anim, "./images/self_prop_ang.gif", fps=10)
+end
+
+t = flow.Δt:flow.Δt:flow.N*flow.Δt*flow.Ncycles
+plot!(-0.2.*cos.(4π.*foil.f.*  t ))
+
+"""
+    trapezoid(f,a,b,n)
+
+Apply the trapezoid integration formula for integrand `f` over
+interval [`a`,`b`], broken up into `n` equal pieces. Returns
+the estimate, a vector of nodes, and a vector of integrand values at the
+nodes.
+"""
+function trapezoid(y,a,b,n)
+    h = (b-a)/n
+    t = range(a,b,length=n+1)
+    # y = f.(t)
+    T = h * ( sum(y[2:n]) + 0.5*(y[1] + y[n+1]) )
+    return T,t,y
 end
 
 """

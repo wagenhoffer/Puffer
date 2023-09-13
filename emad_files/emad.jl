@@ -80,9 +80,9 @@ end
 # function run_simulations(output_dir)
 begin
     # Define parameter ranges
-    Strouhal_values = [0.1, 0.2, 0.3]
-    reduced_freq_values = [0.1, 0.2, 0.3]
-    wave_number_values = [0.1, 0.2, 0.3]
+    Strouhal_values = 0.1:0.01:0.3
+    reduced_freq_values = 0.1:0.01:0.3
+    wave_number_values = 0.1:0.01:0.3
 
     allin = Vector{DataFrame}()
     allout = Vector{DataFrame}()

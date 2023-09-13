@@ -361,7 +361,7 @@ begin
                 inside = [sdf(dest[:,i]) for i in 1:size(dest)[2]] .< 0 
                 iters +=1
             end
-            @show iters
+            # @show iters
             # no vortices are allowed inside of the foil after motion
             @assert sum(inside) == 0
         end        
