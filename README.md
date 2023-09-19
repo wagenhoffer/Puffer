@@ -28,7 +28,8 @@ where $U_\omega$ is velocity induced by the vortex particles in the field, $\mat
 At each time step, vorticity is defined at the trailing edge to satisfy the Kutta condition. The trailing edge panel is assigned the potential difference between the upper and lower panels at the trailing edge of the foil, $\mu_{\rm e} = \mu_{\rm{upper}}-\mu_{\rm{lower}}$, ensuring that the trailing edge of the hydrofoil has no bound circulation. Vorticity is represented in the computational domain by discrete, radially-symmetric, desingularized Gaussian vortex particles. The induced velocity of the vortex blobs is evaluated by application of the Biot-Savart law, yielding [4]:
 
 ```math
-\mathbf{U}_\omega(\mathbf{x},t) = \sum_{i=1}^N \frac{\Gamma_i}{2\pi} \left[1-\exp\left(\frac{-|\mathbf{x - y}|}{2{r_{\rm{cut}}}^2}\right)\right],
+\mathbf{U}_\omega(\mathbf{x},t) = \sum_{i=1}^N \frac{\Gamma_i}{2\pi} \frac{-\mathbf{dy}, \mathbf{dx}}{\sqrt{\mathbf{dx}^2 + \mathbf{dy}^2 + r_{\rm{cut}}^2}},
+
 ```
 
 where $\Gamma$ is the circulation of the vortex particle and $r_{\rm{cut}}$ is the cut-off radius. Following the work of Pan *et al.* [5], the cut-off radius is set to $r_{\rm{cut}} = 1.3\Delta t$ for time step $\Delta t$ to ensure that the wake particle cores overlap and a thin vortex sheet is shed. The evolution of the vortex particle position is updated using a forward Euler scheme [3]. The use of discrete vortices to represent the wake requires the use of two edge panels set behind the foil. The first edge panel, set with the empirical length of $l_{\rm{panel}} = 0.4 U_{\infty}\Delta t$ [6], satisfies the Kutta condition at the trailing edge. Next, the buffer panel is attached to the edge panel and stores information about the previous time step.
