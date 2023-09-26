@@ -152,7 +152,7 @@ function sdf_fence(wake::Wake, foil::Foil, flow::FlowParams; dest = nothing)
     inside = inside .&& xinside
     # Start the looping process, using a quadtree to reduce the computational load
     iters = 1
-    @show sum(inside), iters<10
+
     while sum(inside) > 0 && iters < 10        
         deez = findall(x -> x == 1, inside)
         @show deez
@@ -226,7 +226,7 @@ function sdf_fence(wake::Wake, foils::Vector, flow::FlowParams; mask=nothing)
     dest =  wake.xy + wake.uv * flow.Δt    
     mask = isnothing(mask) ? ones(Bool, length(foils)) : mask
     for i in findall(mask)
-        
+
         dest = sdf_fence(wake, foils[i], flow; dest=dest)              
     end
     dest

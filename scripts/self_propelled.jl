@@ -67,8 +67,8 @@ begin
 
         setσ!(foil, flow; U_b = U_bx)    
         get_panel_vels!(foil, flow)
-        foil.σs = (-U[1] .+ foil.panel_vel[1, :]) .* foil.normals[1, :] +
-                  (foil.panel_vel[2, :]) .* foil.normals[2, :]
+        # foil.σs = (U_bx .+ foil.panel_vel[1, :]) .* foil.normals[1, :] +
+        #           (foil.panel_vel[2, :]) .* foil.normals[2, :]
         
         
         # σ is set - now pull in the information from the turn radius
