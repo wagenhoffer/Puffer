@@ -182,8 +182,6 @@ function norms!(foil::Foil)
     nothing
 end
 
-get_mdpts(foil) = (foil[:, 2:end] + foil[:, 1:end-1]) ./ 2
-
 function move_edge!(foil::Foil, flow::FlowParams)
     edge_vec = [(foil.tangents[1, end] - foil.tangents[1, 1]), (foil.tangents[2, end] - foil.tangents[2, 1])]
     edge_vec ./= norm(edge_vec)

@@ -136,7 +136,7 @@ if @isdefined VISUALIZE
 				@show quinn[:aoa]
 
 			
-				foil, flow = init_params(;quinn...)
+				local foil, flow = init_params(;quinn...)
 				k = foil.f*foil.chord/flow.Uinf
 				foil._foil = (foil._foil' * rotation(quinn[:aoa])')'
 				wake = Wake(foil)
@@ -144,13 +144,13 @@ if @isdefined VISUALIZE
 				#data containers
 				old_mus, old_phis = zeros(3,foil.N), zeros(3,foil.N)   
 				phi = zeros(foil.N)
-				coeffs = zeros(4,flow.Ncycles*flow.N)
+				local coeffs = zeros(4,flow.Ncycles*flow.N)
 				ps = zeros(foil.N , 1)
 				### EXAMPLE OF AN PERFROMANCE METRICS LOOP
 				for i in 1:flow.Ncycles*flow.N
 					time_increment!(flow, foil, wake)
 					phi =  get_phi(foil, wake)                                   
-					p = panel_pressure(foil, flow,  old_mus, old_phis, phi)        
+					local p = panel_pressure(foil, flow,  old_mus, old_phis, phi)        
 					old_mus = [foil.μs'; old_mus[1:2,:]]
 					old_phis = [phi'; old_phis[1:2,:]]
 					coeffs[:,i] = get_performance(foil, flow, p)
