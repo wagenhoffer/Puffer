@@ -207,4 +207,11 @@ function edge_to_body(foil::Foil, flow::FlowParams)
     Γs = [-foil.μ_edge[1] foil.μ_edge[1]]
     ps = foil.edge[:, 1:2]
     vortex_to_target(ps, foil.col, Γs, flow)
+endplt = plot()
+for n in [32,64,128,256]
+    pan[:N] = n
+    foil, flow, wake, coeffs = run_sim(; pan...)
+    coeffs ./= (0.5*flow.Uinf^2)
+    plot!(plt,τ[flow.N:end], coeffs[2, flow.N+shift:end+shift], label="$n")
 end
+plt
