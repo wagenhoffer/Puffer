@@ -76,6 +76,8 @@ end
 
 
 
+
+
 foil, flow, wake, coeffs = run_sim(; moored...)
 begin
     Nt = N = 128
@@ -112,6 +114,7 @@ begin
     end
     gif(movie, "./images/theo.gif", fps=10)
 end
+
 
 
 
