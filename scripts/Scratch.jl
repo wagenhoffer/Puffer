@@ -1,4 +1,5 @@
-include("../src/BemRom.jl")
+# include("../src/BemRom.jl")
+using BemRom
 
 using Plots
 
@@ -9,7 +10,7 @@ heave_pitch[:Nt] = 64
 heave_pitch[:Ncycles] = 2
 heave_pitch[:f] = 1.
 heave_pitch[:Uinf] = 1
-heave_pitch[:kine] = :make_heave_pitch
+heave_pitch[:kine] = :make_ang
 θ0 = deg2rad(5)
 h0 = 0.0
 heave_pitch[:motion_parameters] = [h0, θ0]
@@ -35,7 +36,7 @@ begin
         f = plot_current(foil, wake;window=win)
         f
     end
-    gif(movie, "./images/handp.gif", fps=10)
+    gif(movie, "./images/handp.gif", fps=10)Review
 end
 begin
     Nt = N = 64
@@ -72,6 +73,48 @@ begin
     end
     gif(movie, "./images/theo.gif", fps=10)
 end
+
+
+
+
+
+foil, flow, wake, coeffs = run_sim(; moored...)
+begin
+    Nt = N = 128
+    moored = deepcopy(defaultDict)
+    moored[:Nt] = Nt
+    moored[:N] = N
+
+    moored[:Ncycles] = 5
+    moored[:f] = 0.5
+    moored[:Uinf] = 1.0
+    moored[:kine] = :make_heave_pitch
+    moored[:pivot] = 0.25
+    moored[:thick] = 0.1
+    moored[:foil_type] = :make_teardrop
+    θ0 = deg2rad(8)
+    h0 = 0.01
+    moored[:motion_parameters] = [h0, θ0]
+    foil, flow = init_params(;moored...)
+    wake = Wake(foil)
+    (foil)(flow)
+    ### EXAMPLE OF AN ANIMATION LOOP
+    movie = @animate for i in 1:flow.Ncycles*flow.N
+        time_increment!(flow, foil, wake)
+        # Nice steady window for plotting
+        win = (minimum(foil.foil[1, :]') - foil.chord / 2.0, maximum(foil.foil[1, :]) + foil.chord * 2)
+        #ZOom in on the edge
+        # win = (minimum(foil.foil[1, :]') + 3*foil.chord / 4.0, maximum(foil.foil[1, :]) + foil.chord * 0.1)
+        # if i%flow.N == 0
+        #     spalarts_prune!(wake, flow, foil; keep=flow.N÷2)
+        # end
+        win=nothing
+        f = plot_current(foil, wake;window=win)
+        f
+    end
+    gif(movie, "./images/theo.gif", fps=10)
+end
+
 
 
 

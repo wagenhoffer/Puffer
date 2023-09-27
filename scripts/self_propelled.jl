@@ -32,7 +32,7 @@ begin
   
 
     foil, flow = init_params(;upm...)
-    mass = 1e-1
+    mass = 5e-1
     turns = zeros(flow.Ncycles*flow.N)
     wake = Wake(foil)
     Us = zeros(2, flow.Ncycles*flow.N)
@@ -62,13 +62,13 @@ begin
         end
         # @show U
         Us[:,i] .= U
-        U_bx = -U[1]
+        U_bx = U[1]
         A, rhs, edge_body = make_infs(foil)
 
         setσ!(foil, flow; U_b = U_bx)    
         get_panel_vels!(foil, flow)
-        foil.σs = (-U[1] .+ foil.panel_vel[1, :]) .* foil.normals[1, :] +
-                  (foil.panel_vel[2, :]) .* foil.normals[2, :]
+        # foil.σs = (-U[1] .+ foil.panel_vel[1, :]) .* foil.normals[1, :] +
+        #           (foil.panel_vel[2, :]) .* foil.normals[2, :]
         
         
         # σ is set - now pull in the information from the turn radius
@@ -83,13 +83,13 @@ begin
         body_to_wake!(wake, foil, flow)
         wake_self_vel!(wake, flow)    
         phi =  get_phi(foil, wake)                                   
-        p = panel_pressure(foil, flow,  old_mus, old_phis, phi; U_b = U_bx)        
+        p = panel_pressure(foil, flow, old_mus, old_phis, phi; U_b = U_bx)        
         
         old_mus  = [foil.μs'; old_mus[1:2,:]]
         old_phis = [phi'; old_phis[1:2,:]]
         coeffs[:,i] = get_performance(foil, flow, p)
         ###FAKE COEFF Thrust
-        coeffs[3,i] = 0.2.*cos.(4π.*foil.f.*  i *flow.Δt )
+        # coeffs[3,i] = -0.2.*cos.(4π.*foil.f.*  i *flow.Δt )
         ps[:,i] = p
         f = plot_current(foil, wake)
         plot!(f, ylims=(-1,1))
@@ -100,7 +100,7 @@ begin
 end
 
 t = flow.Δt:flow.Δt:flow.N*flow.Δt*flow.Ncycles
-plot!(-0.2.*cos.(4π.*foil.f.*  t ))
+plot(t,-0.2.*cos.(4π.*foil.f.*  t ))
 
 """
     trapezoid(f,a,b,n)

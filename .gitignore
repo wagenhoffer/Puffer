@@ -1,5 +1,6 @@
 # Graphics Interchange Format
 *.gif
+images/*.gif
 # Portable Network Graphics
 *.png
 #CSV files for data storage
