@@ -254,24 +254,26 @@ NP = 64 #ang[:N]
 # Define the model architecture
 # TODO: write factories for building these out faster
 model = Chain(
-    Dense(ang[:N], NP÷2, Flux.relu),
-           Dense(NP÷2, NP÷4, Flux.relu),
-           Dense(NP÷4, NP÷8, Flux.relu),
-    Dense(NP÷8, NP÷4, Flux.relu),
-           Dense(NP÷4, NP÷2, Flux.relu),
-           Dense(NP÷2, ang[:N], Flux.relu))
-model(foil.σs) #does this kick out numbers?
-model = Chain(
         enc = Chain(Dense(ang[:N], NP÷2, Flux.relu),
            Dense(NP÷2, NP÷4, Flux.relu),
            Dense(NP÷4, NP÷8, Flux.relu)),
+        latent = Chain(Dense(8,8)),
         dec = Chain(Dense(NP÷8, NP÷4, Flux.relu),
            Dense(NP÷4, NP÷2, Flux.relu),
            Dense(NP÷2, ang[:N], Flux.relu)),
         )
 model(foil.σs) #does this kick out numbers?
+# """ We have implemented named tuples for our model. This means we can easily 
+#     process portions of our model. This will be useful when writing new loss functions.
+# """
+@assert model(foil.σs) == model.layers.dec(model.layers.latent(model.layers.enc(foil.σs)))
+# You may often see people write these models in a more function approach, they are equivalent
+@assert model(foil.σs) == foil.σs |> model.layers.enc |> model.layers.latent |> model.layers.dec
 
-map(x -> reshape(x, (NP,1)), [LinRange(1,64, 64)])
+x_in = [foil.col', foil.σs, foil.panel_vel']
+convL = Conv((2,), 5 => 1; stride = 1)
+convL(x_in)
+
 # Define the loss function
 loss(x, y) = Flux.mse(model(x), y)
 
