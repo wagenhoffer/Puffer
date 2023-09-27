@@ -6,7 +6,7 @@ module BemRom
     include("./Body.jl")
     export Foil, make_naca, make_teardrop, make_vandevooren, make_waveform, make_ang
     export make_heave_pitch, make_eldredge, no_motion, angle_of_attack, norms
-    export norms!, get_mdpts, move_edge!, set_collocation!, rotation, next_foil_pos
+    export norms!, move_edge!, set_collocation!, rotation, next_foil_pos
     export move_foil!, do_kinematics!, rotate_about, rotate_about!
 
     include("./Wake.jl")
@@ -15,7 +15,7 @@ module BemRom
 
     include("./Panel.jl")
     export source_inf, doublet_inf, get_panel_vels, get_panel_vels!, panel_frame, get_circulationsm 
-    export make_infs, set_edge_strength!, setσ!, turn_σ!, panel_pressure, edge_to_body
+    export make_infs, set_edge_strength!, setσ!, turn_σ!, panel_pressure, edge_to_body, get_mdpts
 
     include("./Simulation.jl")
     export _propel, run_sim, get_performance, time_increment!, solve_n_update!

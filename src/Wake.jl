@@ -117,3 +117,10 @@ function cancel_buffer_Γ!(wake::Wake, foil::Foil)
     end
     nothing
 end
+
+function cancel_buffer_Γ!(wake::Wake, foils::Vector{Foil{T}}) where T <: Real
+    for (i, foil) in enumerate(foils)
+        wake.xy[:, i]= foil.edge[:,2]
+        wake.Γ[i] = -foil.μ_edge[end]
+    end
+end

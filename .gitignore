@@ -6,3 +6,4 @@
 *.csv
 #coverage files
 *.cov
+*.info
