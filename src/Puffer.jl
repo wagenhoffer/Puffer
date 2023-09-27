@@ -1,4 +1,4 @@
-module BemRom
+module Puffer
 
     include("./FlowParams.jl")
     export FlowParams, init_params

@@ -7,7 +7,7 @@
 # This also directly informs how to augment foil.σ, as foil.panel_vel will just be a linear combination of the
 # kinematic signal vel and the discrete velocity, aka add them
 # '''
-using BemRom
+using Puffer
 # include("../src/BemRom.jl") 
 
 begin

@@ -1,5 +1,5 @@
 # include("../src/BemRom.jl")
-using BemRom
+using Puffer
 
 using Plots
 

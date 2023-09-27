@@ -7,7 +7,7 @@ outputs. The first is data to be used in comparison for @testsets, the other is 
 visualize the comparing data. 
 """
 
-using BemRom
+using Puffer
 using Test
 
 VISUALIZE = false

@@ -1,4 +1,4 @@
-using BemRom
+using Puffer
 # include("../src/BemRom.jl")
 using Test
 using Plots
