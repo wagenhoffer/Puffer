@@ -1,4 +1,7 @@
+<img src="./images/puffer.svg" alt="a logo" height="420" width="auto">
+
 ## Panels and Unsteady Fluid Flow for Embeddings and Reductions [PUFFER] - Numerical Methodologies 
+
 
 A potential flow boundary element method is coupled to a transient acoustics boundary element method via Powell's acoustic analogy to compute all hydrodynamic and acoustic quantities in this work. The methodology and validation of the framework are presented in full detail by Wagenhoffer *et al.* [1,2].
 
