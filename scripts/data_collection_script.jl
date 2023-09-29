@@ -14,9 +14,10 @@ ang = deepcopy(defaultDict)
 ang[:N]       = 64      #number of panels (elements) to discretize the foil
 ang[:Nt]      = 64      #number of timesteps per period of motion
 ang[:Ncycles] = 3       #number of periods to simulate
-ang[:f]       = 0.5     #frequency of wave motion 
-ang[:Uinf]    = 1.0     #free stream velocity 
-ang[:kine]    = :make_ang  #kinematics generation function
+ang[:f]       = 1     #frequency of wave motion 
+ang[:Uinf]    = 1     #free stream velocity 
+ang[:kine]    = :make_ang  
+ang[:T] = Float32 #kinematics generation function
 a0 = 0.1                #how much the leading edge heaves up and down wrt the chord(length) of the swimmer
 ang[:motion_parameters] = a0
 
@@ -62,11 +63,11 @@ end
 
 begin
     """This makes a gif of the same swimmer"""
-    foil, flow = init_params(;ang...)
+    foil, flow = init_params(;ang...)   
     wake = Wake(foil)
     (foil)(flow)
     ### EXAMPLE OF AN ANIMATION LOOP
-    movie = @animate for i in 1:flow.Ncycles*flow.N*1.75
+    movie = @animate for i in 1:flow.Ncycles*flow.N
         time_increment!(flow, foil, wake)
         # Nice steady window for plotting
         win = (minimum(foil.foil[1, :]') - foil.chord / 2.0, maximum(foil.foil[1, :]) + foil.chord * 2)       
@@ -99,7 +100,7 @@ end
 
 
 
-begin
+begin   
 """
 Primitive approach to scraping data needed to train neural networks 
 """
@@ -123,7 +124,7 @@ Primitive approach to scraping data needed to train neural networks
                 ang[:Uinf] = 1.0
                 ang[:f] = reduced_freq * ang[:Uinf]
                 ang[:kine] = :make_ang
-                a0 = 0.1 #St * ang[:Uinf] / ang[:f]
+                a0 = St * ang[:Uinf] / ang[:f]
                 ang[:motion_parameters] = [a0]
 
                 # Initialize Foil and Flow objects
@@ -162,7 +163,7 @@ Primitive approach to scraping data needed to train neural networks
     input_data = vcat(allin...)
     output_data = vcat(allout...)
 
-    save_data(input_data, output_data, output_dir)
+    save_data(input_data, output_data, output_dir)Manifold Galerkin
 end
 
 
@@ -219,9 +220,9 @@ end
 
 
 
-
+### LOAD DATA AND MESS AROUND
 output_dir = "./data/"
-run_simulations(output_dir)
+# run_simulations(output_dir)
 input_data_file = joinpath(output_dir, "input_data.csv")
 output_data_file = joinpath(output_dir, "output_data.csv")
 input_data = CSV.read(input_data_file, DataFrame)
@@ -249,7 +250,7 @@ y_train = [x[2] for x in x_s]  # Extract the second element (μs) from each tupl
 x_train = input_data.σ
 y_train = output_data.mu
 # :N <- number of panels for our swimmer
-NP = 64 #ang[:N]
+NP = ang[:N]
 
 # Define the model architecture
 # TODO: write factories for building these out faster
@@ -271,7 +272,7 @@ model(foil.σs) #does this kick out numbers?
 @assert model(foil.σs) == foil.σs |> model.layers.enc |> model.layers.latent |> model.layers.dec
 
 x_in = [foil.col', foil.σs, foil.panel_vel']
-convL = Conv((2,), 5 => 1; stride = 1)
+convL = Conv((2,), 1 => 1; stride = 1)
 convL(x_in)
 
 # Define the loss function
