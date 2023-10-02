@@ -101,9 +101,9 @@ end
 
 
 begin   
-"""
-Primitive approach to scraping data needed to train neural networks 
-"""
+    """
+    Primitive approach to scraping data needed to train neural networks 
+    """
     # Define parameter ranges
     Strouhal_values = 0.1:0.01:0.3
     reduced_freq_values = 0.1:0.01:0.3
@@ -126,7 +126,7 @@ Primitive approach to scraping data needed to train neural networks
                 ang[:kine] = :make_ang
                 a0 = St * ang[:Uinf] / ang[:f]
                 ang[:motion_parameters] = [a0]
-
+                T = ang[:T]
                 # Initialize Foil and Flow objects
                 foil, fp = init_params(; ang...)
                 wake = Wake(foil)
@@ -135,8 +135,12 @@ Primitive approach to scraping data needed to train neural networks
                 # Perform simulations and save results
                 old_mus, old_phis = zeros(3, foil.N), zeros(3, foil.N)
                 phi = zeros(foil.N)
-                input_data = DataFrame(St = Float64[], reduced_freq = Float64[], wave_number = Float64[], σ = Matrix{Float64}, panel_velocity = Matrix{Float64})
-                output_data = DataFrame(μ = Float64[], pressure = Float64[])
+                # Lets grab this data to start
+                # [foil.col'  foil.normals' foil.tangents' foil.wake_ind_vel' foil.panel_vel' U_inf]
+                input_data = DataFrame(St = T[],       reduced_freq   = T[],       wave_number = T[], U_inf = T[], 
+                                        σ = Matrix{T}, panel_velocity = Matrix{T}, position =  Matrix{T},
+                                        normals =  Matrix{T}, wake_vel = Matrix{T}, tangents =  Matrix{T})
+                output_data = DataFrame(μ = T[], pressure = T[])
                 
                 for i in 1:fp.Ncycles * foil.N
                     time_increment!(fp, foil, wake)
@@ -146,10 +150,14 @@ Primitive approach to scraping data needed to train neural networks
                     old_phis = [phi'; old_phis[1:2, :]]
 
                     if i == 1
-                        input_data = DataFrame(St = [St], reduced_freq = [reduced_freq], wave_number = [wave_number], σ = [foil.σs'], panel_velocity = [foil.panel_vel'])
+                        input_data = DataFrame(St = [St], reduced_freq = [reduced_freq], wave_number = [wave_number], U_inf=[flow.Uinf],
+                                                σ = [foil.σs'], panel_velocity = [foil.panel_vel'], position=[foil.col'],
+                                                normals = [foil.normals'], wake_vel = [foil.wake_ind_vel'], tangents=[foil.tangents'])
                         output_data = DataFrame(μ = [foil.μs'], pressure = [p'])
                     else
-                        append!(input_data, DataFrame(St = [St], reduced_freq = [reduced_freq], wave_number = [wave_number], σ = [foil.σs'], panel_velocity = [foil.panel_vel']))
+                        append!(input_data, DataFrame(St = [St], reduced_freq = [reduced_freq], wave_number = [wave_number], U_inf=[flow.Uinf],
+                                                       σ = [foil.σs'], panel_velocity = [foil.panel_vel'], position=[foil.col'],
+                                                       normals = [foil.normals'], wake_vel = [foil.wake_ind_vel'], tangents=[foil.tangents']))
                         append!(output_data, DataFrame(μ = [foil.μs'], pressure = [p']))
                     end
                 end
@@ -163,7 +171,7 @@ Primitive approach to scraping data needed to train neural networks
     input_data = vcat(allin...)
     output_data = vcat(allout...)
 
-    save_data(input_data, output_data, output_dir)Manifold Galerkin
+    save_data(input_data, output_data, output_dir)
 end
 
 
@@ -237,7 +245,7 @@ output_data = CSV.read(output_data_file, DataFrame)
 
 
 
-
+1
 # bounds are what we can sample from
 bounds = (St = (0.1, 0.3), reduced_freq = (0.1, 0.3), wave_number = (0.1, 0.3))
 # the sample will pull out a St,f,k tuple
@@ -270,9 +278,14 @@ model(foil.σs) #does this kick out numbers?
 @assert model(foil.σs) == model.layers.dec(model.layers.latent(model.layers.enc(foil.σs)))
 # You may often see people write these models in a more function approach, they are equivalent
 @assert model(foil.σs) == foil.σs |> model.layers.enc |> model.layers.latent |> model.layers.dec
+U_inf = repeat([-flow.Uinf, 0.0]', foil.N)
+x_in = [foil.col'  foil.normals' foil.tangents' foil.wake_ind_vel' foil.panel_vel' U_inf]
+x_in = reshape(x_in, NP, 2, 6, 1)
+#WHCN -> width height channels number
+@show x_in |> size
+convL = Conv((1,1), 6 => 6)
 
-x_in = [foil.col', foil.σs, foil.panel_vel']
-convL = Conv((2,), 1 => 1; stride = 1)
+# Flux.@autosize size(x_in)
 convL(x_in)
 
 # Define the loss function
