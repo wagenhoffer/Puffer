@@ -105,9 +105,9 @@ begin
     Primitive approach to scraping data needed to train neural networks 
     """
     # Define parameter ranges
-    Strouhal_values = 0.1:0.01:0.3
-    reduced_freq_values = 0.1:0.01:0.3
-    wave_number_values = 0.1:0.01:0.3
+    Strouhal_values = 0.1:0.1:0.3
+    reduced_freq_values = 0.1:0.1:0.3
+    wave_number_values = 0.1:0.1:0.3
 
     allin = Vector{DataFrame}()
     allout = Vector{DataFrame}()
@@ -179,54 +179,6 @@ end
 
 
 ###############EVERYTHING BELOW IS STRICTLY SCRATCH WORK###############################
-n = length(input_data[:,:σ]) #a single time step
-N = ang[:N] #num elements
-X = zeros(N, n)
-DX = zeros(N,n)
-#start messing with DataDrivenDiffEq
-for i = 1:n
-    X[:,i] = input_data[:,:σ][i]
-    DX[:,i] = output_data[:,:mu][i]
-end
-
-
-prob = DiscreteDataDrivenProblem(X[:,:512],DX[:,1:512])
-prob= ContinuousDataDrivenProblem(X[:,:],DX[:,:])
-prob = ContinuousDataDrivenProblem(reshape(X, (1,length(X))), reshape(DX, (1,length(DX))))
-out = solve(prob, DMDSVD())
-
-
-eqsearch_options = SymbolicRegression.Options(binary_operators = [+, *],
-                                              loss = L1DistLoss(),
-                                              verbosity = -1, progress = false, npop = 30,
-                                              timeout_in_seconds = 60.0)
-
-alg = EQSearch(eq_options = eqsearch_options)
-res = solve(prob, alg, options = DataDrivenCommonOptions(maxiters = 100))
-
-plot(prob)
-
-function create_plot(output_dir)
-    # Load output data
-    output_file = joinpath(output_dir, "output_data.csv")
-    output_data = CSV.read(output_file, DataFrame)
-
-    # Extract relevant columns
-    μ_data = output_data.mu
-    pressure_data = output_data.pressure
-
-    # Create plot
-    t = collect(1:size(μ_data, 2))
-    plot(t, μ_data, label = "μ", xlabel = "Time", ylabel = "μ Value", lw = 2)
-    plot!(t, pressure_data, label = "Pressure", lw = 2)
-
-    # Save plot
-    plot_file = joinpath(output_dir, "simulation_plot.png")
-    savefig(plot_file)
-end
-
-
-
 
 ### LOAD DATA AND MESS AROUND
 output_dir = "./data/"
@@ -236,16 +188,7 @@ output_data_file = joinpath(output_dir, "output_data.csv")
 input_data = CSV.read(input_data_file, DataFrame)
 output_data = CSV.read(output_data_file, DataFrame)
 
-#average_per_cycle(output_dir, foil)
 
-
-
-
-
-
-
-
-1
 # bounds are what we can sample from
 bounds = (St = (0.1, 0.3), reduced_freq = (0.1, 0.3), wave_number = (0.1, 0.3))
 # the sample will pull out a St,f,k tuple
@@ -278,11 +221,28 @@ model(foil.σs) #does this kick out numbers?
 @assert model(foil.σs) == model.layers.dec(model.layers.latent(model.layers.enc(foil.σs)))
 # You may often see people write these models in a more function approach, they are equivalent
 @assert model(foil.σs) == foil.σs |> model.layers.enc |> model.layers.latent |> model.layers.dec
-U_inf = repeat([-flow.Uinf, 0.0]', foil.N)
-x_in = [foil.col'  foil.normals' foil.tangents' foil.wake_ind_vel' foil.panel_vel' U_inf]
-x_in = reshape(x_in, NP, 2, 6, 1)
+
+
+##### CONVOLUTIONAL LAYERS
+
+# Prepare and shape the data for input/output
+σs = nothing
+inputs = nothing
+for row in eachrow(input_data)
+    U_inf = repeat([-row.U_inf, 0.0]', foil.N)
+    # DataFrame(St, reduced_freq, wave_number, U_inf,
+    # σ , panel_velocity , position,
+    # normals, wake_vel , tangents)
+    x_in = [row.position  row.normals row.wake_vel row.panel_velocity U_inf]
+    x_in = reshape(x_in, NP, 2, 5, 1)
+    σs = isnothing(σs) ? row.σ : vcat(σs,row.σ)
+    inputs = isnothing(inputs) ? x_in : cat(inputs, x_in; dims=4)
+end
+
+
+
 #WHCN -> width height channels number
-@show x_in |> size
+@show inputs |> size  
 convL = Conv((1,1), 6 => 6)
 
 # Flux.@autosize size(x_in)
