@@ -5,6 +5,7 @@ images/*.gif
 *.png
 #CSV files for data storage
 *.csv
+/data/*.csv
 #coverage files
 *.cov
 *.info
