@@ -100,8 +100,8 @@ begin
     for (i,strou) in enumerate(Strous)
         pan[:f] = strou*pan[:Uinf]/2.0/h0
         foil, flow, wake, coeffs = run_sim(; pan...)
-        Cts[i] = sum(coeffs[3,flow.N:end])./(flow.Ncycles-1)
+        Cts[i] = sum(coeffs[3,flow.N:end])./(flow.Ncycles-1)./flow.N
     end
-    plot(Cts)
+    plot(Strous, Cts)
         
 end
