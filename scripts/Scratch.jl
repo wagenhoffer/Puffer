@@ -38,6 +38,7 @@ begin
     end
     gif(movie, "./images/handp.gif", fps=10)Review
 end
+
 begin
     Nt = N = 64
     moored = deepcopy(defaultDict)
