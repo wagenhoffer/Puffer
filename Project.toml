@@ -2,6 +2,7 @@ name = "Puffer"
 uuid = "10545863-413a-4f85-9bd3-68b9e825dcdc"
 authors = ["wagenhoffer <77755517+wagenhoffer@users.noreply.github.com>"]
 version = "0.1.0"
+
 [compat]
 julia = "1.8.5, 1.9.3"
 
