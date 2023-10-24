@@ -3,7 +3,7 @@
 ## Panels and Unsteady Fluid Flow for Embeddings and Reductions [PUFFER] - Numerical Methodologies 
 
 
-A potential flow boundary element method is coupled to a transient acoustics boundary element method via Powell's acoustic analogy to compute all hydrodynamic and acoustic quantities in this work. The methodology and validation of the framework are presented in full detail by Wagenhoffer *et al.* [1,2].
+Potential flow boundary elements with an inviscid vortex particle wake. The methodology and validation of the framework are presented in full detail by Wagenhoffer *et al.* [1,2].
 
 The potential flow solver is an adaptation of the panel method described by Willis *et al.* [3]. The inviscid flow around hydrofoils can be found by solving the Laplace equations with an imposed no-penetration boundary condition on the body surface,
 

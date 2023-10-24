@@ -52,7 +52,7 @@ function moored_teardrop(;Nt = 64, N = 64)
 	ck = theo(k)
 	@. cl = -2*π^2*St*abs.(ck)*cos(2π.*τ + angle(ck)) - π^2*St*k*sin(2π.*τ)
 
-	shift = -2
+	shift = -3
 	plot(τ[flow.N:end], coeffs[2, flow.N+shift:end+shift], marker=:circle, label="BEM Lift")
 	plt = plot!(τ[flow.N:end], cl[flow.N:end], label="Theo Lift",lw=3,ylims=(-0.25,0.25))
 	[cl[flow.N:end], coeffs[2,flow.N+shift:end+shift]], plt
