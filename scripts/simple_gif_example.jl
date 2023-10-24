@@ -25,15 +25,15 @@ begin
     heave_pitch[:motion_parameters] = [h0, θ0]
     foil, flow = init_params(; heave_pitch...)
     wake = Wake(foil)
-    (foil)(flow)    
-    movie = @animate for i in 1:flow.Ncycles*flow.N
-        time_increment!(flow, foil, wake)        
+    (foil)(flow)
+    movie = @animate for i in 1:(flow.Ncycles * flow.N)
+        time_increment!(flow, foil, wake)
         # win = (minimum(foil.foil[1, :]') - foil.chord / 2.0, maximum(foil.foil[1, :]) + foil.chord * 2)
         win = nothing
-        f = plot_current(foil, wake; window=win)
+        f = plot_current(foil, wake; window = win)
         f
     end
-    gif(movie, "./images/h_$(h0)_p_$(rad2deg(θ0)).gif", fps=30)
+    gif(movie, "./images/h_$(h0)_p_$(rad2deg(θ0)).gif", fps = 30)
 end
 
 """
@@ -50,17 +50,16 @@ begin
     # The first major difference is the kinematics function to dispatch on
     ang[:kine] = :make_ang
     ang[:k] = 1.0
-    
-    
+
     foil, flow = init_params(; ang...)
     wake = Wake(foil)
-    (foil)(flow)    
-    movie = @animate for i in 1:flow.Ncycles*flow.N
-        time_increment!(flow, foil, wake)        
+    (foil)(flow)
+    movie = @animate for i in 1:(flow.Ncycles * flow.N)
+        time_increment!(flow, foil, wake)
         # win = (minimum(foil.foil[1, :]') - foil.chord / 2.0, maximum(foil.foil[1, :]) + foil.chord * 2)
         win = nothing
-        f = plot_current(foil, wake; window=win)
+        f = plot_current(foil, wake; window = win)
         f
     end
-    gif(movie, "./images/ang_f_$(ang[:f])_k_$(ang[:k]).gif", fps=30)
+    gif(movie, "./images/ang_f_$(ang[:f])_k_$(ang[:k]).gif", fps = 30)
 end

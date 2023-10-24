@@ -2,7 +2,7 @@ abstract type Body end
 
 #  Foil struct and related functions
 mutable struct Foil{T} <: Body
-    kine  #kinematics: heave or traveling wave function
+    kine::Any  #kinematics: heave or traveling wave function
     f::T #wave freq
     k::T # wave number
     N::Int # number of elements
@@ -28,44 +28,47 @@ mutable struct Foil{T} <: Body
 end
 
 # NACA0012 Foil
-function make_naca(N; chord=1, thick=0.12)
+function make_naca(N; chord = 1, thick = 0.12)
     # N = 7
     an = [0.2969, -0.126, -0.3516, 0.2843, -0.1036]
     # T = 0.12 #thickness
-    yt(x_) = thick / 0.2 * (an[1] * x_^0.5 + an[2] * x_ + an[3] * x_^2 + an[4] * x_^3 + an[5] * x_^4)
+    function yt(x_)
+        thick / 0.2 *
+        (an[1] * x_^0.5 + an[2] * x_ + an[3] * x_^2 + an[4] * x_^3 + an[5] * x_^4)
+    end
     #neutral x
     x = (1 .- cos.(LinRange(0, pi, (N + 2) ÷ 2))) / 2.0
-    foil = [[x[end:-1:1]; x[2:end]]'
+    foil = [[x[end:-1:1]; x[2:end]]';
         [-yt.(x[end:-1:1]); yt.(x[2:end])]']
     foil .* chord
 end
 
-function make_teardrop(N; chord=1, thick=0.01)
+function make_teardrop(N; chord = 1, thick = 0.01)
     # Generate points for the bottom surface
     xb = LinRange(pi, 0, (N + 2) ÷ 2)
     xt = LinRange(0, pi, (N + 2) ÷ 2)
 
     # Slopes and intersects for the line segments
-    m = -thick/2 / (chord - thick/2)
-    b = thick/2 + thick^2/4 / (chord - thick/2)
+    m = -thick / 2 / (chord - thick / 2)
+    b = thick / 2 + thick^2 / 4 / (chord - thick / 2)
 
     # Tear drop shape equation.
     x_c = 0.5 .* (1 .- cos.(xb))
     xb = x_c .* chord
-    xb1 = filter(x -> x <= thick/2, xb)
-    xb2 = filter(x -> x > thick/2, xb)
+    xb1 = filter(x -> x <= thick / 2, xb)
+    xb2 = filter(x -> x > thick / 2, xb)
 
     zb2 = -m .* xb2 .- b
-    zb1 = -sqrt.((thick/2)^2 .- (xb1 .- thick/2).^2)
+    zb1 = -sqrt.((thick / 2)^2 .- (xb1 .- thick / 2) .^ 2)
     zb = vcat(zb2, zb1)
 
     # Tear drop shape equation.
     x_c = 0.5 .* (1 .- cos.(xt))
     xt = x_c .* chord
-    xt1 = filter(x -> x <= thick/2, xt)
-    xt2 = filter(x -> x > thick/2, xt)
+    xt1 = filter(x -> x <= thick / 2, xt)
+    xt2 = filter(x -> x > thick / 2, xt)
 
-    zt1 = sqrt.((thick/2)^2 .- (xt1 .- thick/2).^2)
+    zt1 = sqrt.((thick / 2)^2 .- (xt1 .- thick / 2) .^ 2)
     zt2 = m .* xt2 .+ b
     zt = vcat(zt1, zt2)
 
@@ -80,19 +83,22 @@ function make_teardrop(N; chord=1, thick=0.01)
     [x'; z']
 end
 
-function make_vandevooren(N; chord=1.0, thick=0.75, K=1.93)
+function make_vandevooren(N; chord = 1.0, thick = 0.75, K = 1.93)
     A = chord * ((1 + thick)^(K - 1)) * (2^(-K))
     THETA = LinRange(0, pi, Int(N ÷ 2) + 1)
 
-    R1 = sqrt.((A * cos.(THETA) .- A).^2 + (A^2) .* sin.(THETA).^2)
-    R2 = sqrt.((A * cos.(THETA) .- thick * A).^2 + (A^2) .* sin.(THETA).^2)
+    R1 = sqrt.((A * cos.(THETA) .- A) .^ 2 + (A^2) .* sin.(THETA) .^ 2)
+    R2 = sqrt.((A * cos.(THETA) .- thick * A) .^ 2 + (A^2) .* sin.(THETA) .^ 2)
 
     THETA1 = atan.(A * sin.(THETA), A * cos.(THETA) .- A)
     THETA2 = atan.(A * sin.(THETA), A * cos.(THETA) .- thick * A)
 
-    x = ((R1.^K) ./ (R2.^(K - 1))) .* (cos.(K * THETA1) .* cos.((K - 1) * THETA2) + sin.(K * THETA1) .* sin.((K - 1) * THETA2))
-    z_top = ((R1.^K) ./ (R2.^(K - 1))) .* (sin.(K * THETA1) .* cos.((K - 1) * THETA2) - cos.(K * THETA1) .* sin.((K - 1) * THETA2))
-    z_bot = -((R1.^K) ./ (R2.^(K - 1))) .* (sin.(K * THETA1) .* cos.((K - 1) * THETA2) - cos.(K * THETA1) .* sin.((K - 1) * THETA2))
+    x = ((R1 .^ K) ./ (R2 .^ (K - 1))) .* (cos.(K * THETA1) .* cos.((K - 1) * THETA2) +
+         sin.(K * THETA1) .* sin.((K - 1) * THETA2))
+    z_top = ((R1 .^ K) ./ (R2 .^ (K - 1))) .* (sin.(K * THETA1) .* cos.((K - 1) * THETA2) -
+             cos.(K * THETA1) .* sin.((K - 1) * THETA2))
+    z_bot = -((R1 .^ K) ./ (R2 .^ (K - 1))) .* (sin.(K * THETA1) .* cos.((K - 1) * THETA2) -
+             cos.(K * THETA1) .* sin.((K - 1) * THETA2))
 
     x = x .- x[end]  # Carrying the leading edge to the origin
     x[1] = chord
@@ -102,14 +108,13 @@ function make_vandevooren(N; chord=1.0, thick=0.75, K=1.93)
     z_bot[end] = 0
 
     # Merge top and bottom surfaces together
-    x = vcat(x, x[end-1:-1:1])
-    z = vcat(z_bot, z_top[end-1:-1:1])
+    x = vcat(x, x[(end - 1):-1:1])
+    z = vcat(z_bot, z_top[(end - 1):-1:1])
 
     [x'; z']
 end
 
-
-function make_waveform(a0=0.1, a=[0.367, 0.323, 0.310]; T=Float64)
+function make_waveform(a0 = 0.1, a = [0.367, 0.323, 0.310]; T = Float64)
     a0 = T(a0)
     a = a .|> T
     f = k = T(1)
@@ -120,7 +125,7 @@ function make_waveform(a0=0.1, a=[0.367, 0.323, 0.310]; T=Float64)
     h
 end
 
-function make_ang(a0=0.1; a=[0.367, 0.323, 0.310])
+function make_ang(a0 = 0.1; a = [0.367, 0.323, 0.310])
     a0 = a0
     a = a
     f = π
@@ -131,39 +136,41 @@ function make_ang(a0=0.1; a=[0.367, 0.323, 0.310])
     h
 end
 
-function make_heave_pitch(h0, θ0; T=Float64)
+function make_heave_pitch(h0, θ0; T = Float64)
     θ(f, t, ψ) = θ0 * sin(2 * π * f * t + ψ)
     h(f, t) = h0 * sin(2 * π * f * t)
     [h, θ]
 end
 
-function make_eldredge(α, αdot;s = 0.001,chord=1.0, Uinf = 1.0)
-    K = αdot*chord/(2*Uinf)
-    a(σ) = π^2 *K /(2*α*(1.0 -σ))
-    
+function make_eldredge(α, αdot; s = 0.001, chord = 1.0, Uinf = 1.0)
+    K = αdot * chord / (2 * Uinf)
+    a(σ) = π^2 * K / (2 * α * (1.0 - σ))
+
     t1 = 1.0
-    t2 = t1 + α/2/K
-    t3 = t2 + π*α/4/K - α/2/K
-    t4 = t3 + α/2/K
-    eld(t) = log((cosh(a(s)*(t - t1))*cosh(a(s)*(t - t4)))/
-                 (cosh(a(s)*(t - t2))*cosh(a(s)*(t - t3))))
-    maxG = maximum(filter(x->!isnan(x), eld.(0:0.1:100)))
-    pitch(f,tt,p) = α*eld(tt)/maxG
-    heave(f,t) = 0.0
+    t2 = t1 + α / 2 / K
+    t3 = t2 + π * α / 4 / K - α / 2 / K
+    t4 = t3 + α / 2 / K
+    function eld(t)
+        log((cosh(a(s) * (t - t1)) * cosh(a(s) * (t - t4))) /
+            (cosh(a(s) * (t - t2)) * cosh(a(s) * (t - t3))))
+    end
+    maxG = maximum(filter(x -> !isnan(x), eld.(0:0.1:100)))
+    pitch(f, tt, p) = α * eld(tt) / maxG
+    heave(f, t) = 0.0
     [heave, pitch]
 end
 
-function no_motion(; T=Float64)
+function no_motion(; T = Float64)
     sig(x, f, k, t) = 0.0
 end
 
-function angle_of_attack(; aoa=5, T=Float64)
+function angle_of_attack(; aoa = 5, T = Float64)
     sig(x, f, k, t) = rotation(-aoa * pi / 180)'
 end
 
 function norms(foil)
-    dxdy = diff(foil, dims=2)
-    lengths = sqrt.(sum(abs2, diff(foil, dims=2), dims=1))
+    dxdy = diff(foil, dims = 2)
+    lengths = sqrt.(sum(abs2, diff(foil, dims = 2), dims = 1))
     tx = dxdy[1, :]' ./ lengths
     ty = dxdy[2, :]' ./ lengths
     # tangents x,y normals x, y  lengths
@@ -171,8 +178,8 @@ function norms(foil)
 end
 
 function norms!(foil::Foil)
-    dxdy = diff(foil.foil, dims=2)
-    lengths = sqrt.(sum(abs2, dxdy, dims=1))
+    dxdy = diff(foil.foil, dims = 2)
+    lengths = sqrt.(sum(abs2, dxdy, dims = 1))
     tx = dxdy[1, :]' ./ lengths
     ty = dxdy[2, :]' ./ lengths
     # tangents x,y normals x, y  lengths
@@ -183,9 +190,12 @@ function norms!(foil::Foil)
 end
 
 function move_edge!(foil::Foil, flow::FlowParams)
-    edge_vec = [(foil.tangents[1, end] - foil.tangents[1, 1]), (foil.tangents[2, end] - foil.tangents[2, 1])]
+    edge_vec = [
+        (foil.tangents[1, end] - foil.tangents[1, 1]),
+        (foil.tangents[2, end] - foil.tangents[2, 1]),
+    ]
     edge_vec ./= norm(edge_vec)
-    edge_vec .*= flow.Uinf * flow.Δt 
+    edge_vec .*= flow.Uinf * flow.Δt
     #The edge starts at the TE -> advects some scale down -> the last midpoint
     foil.edge = [foil.foil[:, end] (foil.foil[:, end] .+ 0.4 * edge_vec) foil.edge[:, 2]]
     #static buffer is a bugger
@@ -193,25 +203,27 @@ function move_edge!(foil::Foil, flow::FlowParams)
     nothing
 end
 
-function set_collocation!(foil::Foil, S=0.005)
-    foil.col = (get_mdpts(foil.foil) .+ repeat(S .* foil.panel_lengths', 2, 1) .* -foil.normals)
+function set_collocation!(foil::Foil, S = 0.005)
+    foil.col = (get_mdpts(foil.foil) .+
+                repeat(S .* foil.panel_lengths', 2, 1) .* -foil.normals)
 end
 
 rotation(α) = [cos(α) -sin(α)
-               sin(α) cos(α)]
+    sin(α) cos(α)]
 
 function next_foil_pos(foil::Foil, flow::FlowParams)
     #perform kinematics
     if typeof(foil.kine) == Vector{Function}
         h = foil.kine[1](foil.f, flow.n * flow.Δt)
-        θ = foil.kine[2](foil.f, flow.n * flow.Δt, -π/2)
+        θ = foil.kine[2](foil.f, flow.n * flow.Δt, -π / 2)
         pos = rotate_about(foil, θ)
         pos[2, :] .+= h
         #Advance the foil in flow
         pos .+= [-flow.Uinf, 0] .* flow.Δt .* flow.n
     else
         pos = deepcopy(foil.foil)
-        pos[2, :] = foil._foil[2, :] .+ foil.kine.(foil._foil[1, :], foil.f, foil.k, flow.n * flow.Δt)
+        pos[2, :] = foil._foil[2, :] .+
+                    foil.kine.(foil._foil[1, :], foil.f, foil.k, flow.n * flow.Δt)
         #Advance the foil in flow
         pos .+= [-flow.Uinf, 0] .* flow.Δt
     end
@@ -226,24 +238,25 @@ function move_foil!(foil::Foil, pos)
     flow.n += 1
 end
 
-function do_kinematics!(foils::Vector{Foil{T}}, flow::FlowParams) where T<:Real
+function do_kinematics!(foils::Vector{Foil{T}}, flow::FlowParams) where {T <: Real}
     for foil in foils
-    #perform kinematics
+        #perform kinematics
         if typeof(foil.kine) == Vector{Function}
-            le = foil.foil[1,foil.N÷2 + 1]
+            le = foil.foil[1, foil.N ÷ 2 + 1]
             h = foil.kine[1](foil.f, flow.n * flow.Δt)
-            θ = foil.kine[2](foil.f, flow.n * flow.Δt, -π/2)
+            θ = foil.kine[2](foil.f, flow.n * flow.Δt, -π / 2)
             rotate_about!(foil, θ)
-           
+
             #Advance the foil in flow
             # foil.foil[1,:] .+= le
             foil.foil .+= foil.LE
             foil.foil[2, :] .+= h
-            foil.foil .+= [-flow.Uinf, 0] .* flow.Δt 
-            foil.LE = foil.foil[:, foil.N÷2 + 1]
-            
+            foil.foil .+= [-flow.Uinf, 0] .* flow.Δt
+            foil.LE = foil.foil[:, foil.N ÷ 2 + 1]
+
         else
-            foil.foil[2, :] = foil._foil[2, :] .+ foil.kine.(foil._foil[1, :], foil.f, foil.k, flow.n * flow.Δt)
+            foil.foil[2, :] = foil._foil[2, :] .+
+                              foil.kine.(foil._foil[1, :], foil.f, foil.k, flow.n * flow.Δt)
             #Advance the foil in flow
             foil.foil .+= [-flow.Uinf, 0] .* flow.Δt
         end
@@ -255,14 +268,13 @@ function do_kinematics!(foils::Vector{Foil{T}}, flow::FlowParams) where T<:Real
     nothing
 end
 
-function rotate_about!(foil, θ; pivot=foil.pivot)
+function rotate_about!(foil, θ; pivot = foil.pivot)
     foil.foil = ([foil._foil[1, :] .- foil.pivot foil._foil[2, :]] * rotation(θ))'
-    foil.foil[1, :] .+= pivot 
+    foil.foil[1, :] .+= pivot
     nothing
 end
 function rotate_about(foil, θ)
     pos = ([foil._foil[1, :] .- foil.pivot foil._foil[2, :]] * rotation(θ))'
-    pos[1, :] .+= foil.pivot 
+    pos[1, :] .+= foil.pivot
     pos
 end
-

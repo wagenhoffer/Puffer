@@ -61,58 +61,57 @@ ang[:Nt] = 64     #number of timesteps per period of motion
 ang[:Ncycles] = 3 #number of periods to simulate
 ang[:f] = 1.0      #frequency of wave motion 
 ang[:Uinf] = 1.0    #free stream velocity 
-ang[:kine] = :make_ang 
+ang[:kine] = :make_ang
 a0 = 0.1 # how much the leading edge heaves up and down wrt the chord(length) of the swimmer
 ang[:motion_parameters] = a0
 
-
 begin
-    foil, flow = init_params(;ang...)
-    k = foil.f*foil.chord/flow.Uinf
+    foil, flow = init_params(; ang...)
+    k = foil.f * foil.chord / flow.Uinf
     @show k
     wake = Wake(foil)
     (foil)(flow)
     #data containers
-    old_mus, old_phis = zeros(3,foil.N), zeros(3,foil.N)   
+    old_mus, old_phis = zeros(3, foil.N), zeros(3, foil.N)
     phi = zeros(foil.N)
-    coeffs = zeros(4,flow.Ncycles*flow.N)
-    ps = zeros(foil.N ,flow.Ncycles*flow.N)
+    coeffs = zeros(4, flow.Ncycles * flow.N)
+    ps = zeros(foil.N, flow.Ncycles * flow.N)
     ### EXAMPLE OF AN PERFROMANCE METRICS LOOP
-    for i in 1:flow.Ncycles*flow.N
-        time_increment!(flow, foil, wake)        
-        phi =  get_phi(foil, wake)    # (output space) <-probably not that important                            
-        p = panel_pressure(foil, flow,  old_mus, old_phis, phi)    
+    for i in 1:(flow.Ncycles * flow.N)
+        time_increment!(flow, foil, wake)
+        phi = get_phi(foil, wake)    # (output space) <-probably not that important                            
+        p = panel_pressure(foil, flow, old_mus, old_phis, phi)
         # (output space) <- p is a function of μ and we should be able to recreate this     
-        old_mus = [foil.μs'; old_mus[1:2,:]]
-        old_phis = [phi'; old_phis[1:2,:]]
-        coeffs[:,i] = get_performance(foil, flow, p)
+        old_mus = [foil.μs'; old_mus[1:2, :]]
+        old_phis = [phi'; old_phis[1:2, :]]
+        coeffs[:, i] = get_performance(foil, flow, p)
         # the coefficients of PERFROMANCE are important, but are just a scaling of P
         # if we can recreate p correctly, this will be easy to get also (not important at first)
-        ps[:,i] = p # storage container of the output, nice!
+        ps[:, i] = p # storage container of the output, nice!
     end
-    t = range(0, stop=flow.Ncycles*flow.N*flow.Δt, length=flow.Ncycles*flow.N)
+    t = range(0, stop = flow.Ncycles * flow.N * flow.Δt, length = flow.Ncycles * flow.N)
     start = flow.N
-    a = plot(t[start:end], coeffs[1,start:end], label="Force"  ,lw = 3, marker=:circle)
-    b = plot(t[start:end], coeffs[2,start:end], label="Lift"   ,lw = 3, marker=:circle)
-    c = plot(t[start:end], coeffs[3,start:end], label="Thrust" ,lw = 3, marker=:circle)
-    d = plot(t[start:end], coeffs[4,start:end], label="Power"  ,lw = 3, marker=:circle)
-    plot(a,b,c,d, layout=(2,2), legend=:topleft, size =(800,800))
+    a = plot(t[start:end], coeffs[1, start:end], label = "Force", lw = 3, marker = :circle)
+    b = plot(t[start:end], coeffs[2, start:end], label = "Lift", lw = 3, marker = :circle)
+    c = plot(t[start:end], coeffs[3, start:end], label = "Thrust", lw = 3, marker = :circle)
+    d = plot(t[start:end], coeffs[4, start:end], label = "Power", lw = 3, marker = :circle)
+    plot(a, b, c, d, layout = (2, 2), legend = :topleft, size = (800, 800))
 end
 
 begin
     # watch a video of the motion, does it blow up? if so, what went wrong? 
-    foil, flow = init_params(;ang...)
+    foil, flow = init_params(; ang...)
     wake = Wake(foil)
     (foil)(flow)
     ### EXAMPLE OF AN ANIMATION LOOP
-    movie = @animate for i in 1:flow.Ncycles*flow.N*1.75
+    movie = @animate for i in 1:(flow.Ncycles * flow.N * 1.75)
         time_increment!(flow, foil, wake)
         # Nice steady window for plotting
-        win = (minimum(foil.foil[1, :]') - foil.chord / 2.0, maximum(foil.foil[1, :]) + foil.chord * 2)       
-        win=nothing
-        f = plot_current(foil, wake;window=win)
-        plot!(f, ylims=(-1,1))
-        
+        win = (minimum(foil.foil[1, :]') - foil.chord / 2.0,
+            maximum(foil.foil[1, :]) + foil.chord * 2)
+        win = nothing
+        f = plot_current(foil, wake; window = win)
+        plot!(f, ylims = (-1, 1))
     end
-    gif(movie, "handp.gif", fps=10)
+    gif(movie, "handp.gif", fps = 10)
 end

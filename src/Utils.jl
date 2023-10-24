@@ -8,22 +8,22 @@ using BSplineKit
 using Statistics
 using SpecialFunctions
 
-defaultDict = Dict(:T     => Float64,
-	:N     => 64,
+defaultDict = Dict(:T => Float64,
+    :N => 64,
     :foil_type => :make_naca,
-	:kine  => :make_ang,
-	:f     => 1,
-	:k     => 1,
-	:chord => 1.0,
-	:Nt    => 150,
+    :kine => :make_ang,
+    :f => 1,
+    :k => 1,
+    :chord => 1.0,
+    :Nt => 150,
     :Ncycles => 1,
-	:Uinf   => 1.0,
-	:ρ      => 1000.0, 
+    :Uinf => 1.0,
+    :ρ => 1000.0,
     :Nfoils => 1,
-    :pivot  => 0.0, 
+    :pivot => 0.0,
     :thick => 0.12)
 
-function plot_current(foil::Foil, wake::Wake; window=nothing)
+function plot_current(foil::Foil, wake::Wake; window = nothing)
     if !isnothing(window)
         xs = (window[1], window[2])
     else
@@ -32,17 +32,25 @@ function plot_current(foil::Foil, wake::Wake; window=nothing)
     max_val = maximum(abs, wake.Γ)
     max_val = std(wake.Γ) / 2.0
 
-    a = plot(foil.foil[1, :], foil.foil[2, :], aspect_ratio=:equal, label="")
-    plot!(a, foil.edge[1, :], foil.edge[2, :], label="")
-    plot!(a, wake.xy[1, :], wake.xy[2, :],
+    a = plot(foil.foil[1, :], foil.foil[2, :], aspect_ratio = :equal, label = "")
+    plot!(a, foil.edge[1, :], foil.edge[2, :], label = "")
+    plot!(a,
+        wake.xy[1, :],
+        wake.xy[2, :],
         # markersize=wake.Γ .* 10, st=:scatter, label="",
-        markersize=3, st=:scatter, label="", msw=0, xlims=xs,
-        marker_z=-wake.Γ, #/mean(abs.(wake.Γ)),
-        color=cgrad(:coolwarm),
-        clim=(-max_val, max_val))
+        markersize = 3,
+        st = :scatter,
+        label = "",
+        msw = 0,
+        xlims = xs,
+        marker_z = -wake.Γ, #/mean(abs.(wake.Γ)),
+        color = cgrad(:coolwarm),
+        clim = (-max_val, max_val))
     a
 end
-function plot_current(foils::Vector{Foil{T}}, wake::Wake; window=nothing) where T <: Real
+function plot_current(foils::Vector{Foil{T}},
+    wake::Wake;
+    window = nothing) where {T <: Real}
     if !isnothing(window)
         xs = (window[1], window[2])
     else
@@ -52,33 +60,39 @@ function plot_current(foils::Vector{Foil{T}}, wake::Wake; window=nothing) where 
     max_val = std(wake.Γ) / 2.0
     a = plot()
     for foil in foils
-        plot!(a,foil.foil[1, :], foil.foil[2, :], aspect_ratio=:equal, label="")
-        plot!(a, foil.edge[1, :], foil.edge[2, :], label="")
+        plot!(a, foil.foil[1, :], foil.foil[2, :], aspect_ratio = :equal, label = "")
+        plot!(a, foil.edge[1, :], foil.edge[2, :], label = "")
     end
-    plot!(a, wake.xy[1, :], wake.xy[2, :],    
-        markersize=3, st=:scatter, label="", msw=0, xlims=xs,
-        marker_z=-wake.Γ, #/mean(abs.(wake.Γ)),
-        color=cgrad(:coolwarm),
-        clim=(-max_val, max_val))
+    plot!(a,
+        wake.xy[1, :],
+        wake.xy[2, :],
+        markersize = 3,
+        st = :scatter,
+        label = "",
+        msw = 0,
+        xlims = xs,
+        marker_z = -wake.Γ, #/mean(abs.(wake.Γ)),
+        color = cgrad(:coolwarm),
+        clim = (-max_val, max_val))
     a
 end
 
-
 function plot_with_normals(foil::Foil)
-    plot(foil.foil[1, :], foil.foil[2, :], aspect_ratio=:equal, label="")
-    quiver!(foil.col[1, :], foil.col[2, :],
-        quiver=(foil.normals[1, :], foil.normals[2, :]))
+    plot(foil.foil[1, :], foil.foil[2, :], aspect_ratio = :equal, label = "")
+    quiver!(foil.col[1, :],
+        foil.col[2, :],
+        quiver = (foil.normals[1, :], foil.normals[2, :]))
 end
 
 function plot_coeffs(coeffs, flow)
-	t = range(0, stop=flow.Ncycles*flow.N*flow.Δt, length=flow.Ncycles*flow.N)
+    t = range(0, stop = flow.Ncycles * flow.N * flow.Δt, length = flow.Ncycles * flow.N)
     start = flow.N
-    a = plot(t[start:end], coeffs[1,start:end], label="Force"  ,lw = 3, marker=:circle)
-    b = plot(t[start:end], coeffs[2,start:end], label="Lift"   ,lw = 3, marker=:circle)
-    c = plot(t[start:end], coeffs[3,start:end], label="Thrust" ,lw = 3, marker=:circle)
-    d = plot(t[start:end], coeffs[4,start:end], label="Power"  ,lw = 3, marker=:circle)
-    p = plot(a,b,c,d, layout=(2,2), legend=:topleft, size =(800,800))
-	p 
+    a = plot(t[start:end], coeffs[1, start:end], label = "Force", lw = 3, marker = :circle)
+    b = plot(t[start:end], coeffs[2, start:end], label = "Lift", lw = 3, marker = :circle)
+    c = plot(t[start:end], coeffs[3, start:end], label = "Thrust", lw = 3, marker = :circle)
+    d = plot(t[start:end], coeffs[4, start:end], label = "Power", lw = 3, marker = :circle)
+    p = plot(a, b, c, d, layout = (2, 2), legend = :topleft, size = (800, 800))
+    p
 end
 
 """
@@ -98,15 +112,16 @@ It can optionally skip a number of initial cycles and further divide each cycle 
 """
 function cycle_averaged(coeffs, flow::FlowParams, skip_cycles = 0, sub_cycles = 1)
     # Assertions for error handling
-    @assert skip_cycles >= 0 "skip_cycles should be a non-negative integer"
-    @assert sub_cycles > 0 "sub_cycles should be a positive integer"
+    @assert skip_cycles>=0 "skip_cycles should be a non-negative integer"
+    @assert sub_cycles>0 "sub_cycles should be a positive integer"
 
-    avg_vals = zeros(4, (flow.Ncycles-skip_cycles)*sub_cycles)
-    for i = skip_cycles*sub_cycles+1:flow.Ncycles*sub_cycles
-        avg_vals[:,i-skip_cycles*sub_cycles] = 
-        sum(coeffs[:,(i-1)*flow.N÷sub_cycles+1:(i)*flow.N÷sub_cycles],dims=2)
+    avg_vals = zeros(4, (flow.Ncycles - skip_cycles) * sub_cycles)
+    for i in (skip_cycles * sub_cycles + 1):(flow.Ncycles * sub_cycles)
+        avg_vals[:, i - skip_cycles * sub_cycles] = sum(coeffs[:,
+                ((i - 1) * flow.N ÷ sub_cycles + 1):((i) * flow.N ÷ sub_cycles)],
+            dims = 2)
     end
-    avg_vals ./= flow.N/sub_cycles
+    avg_vals ./= flow.N / sub_cycles
 end
 
 # # Test cases
@@ -143,44 +158,47 @@ the remaining vortices in the wake.
 
 """
 
-function spalarts_prune!(wake::Wake, flow::FlowParams, foil::Foil; keep=0)
+function spalarts_prune!(wake::Wake, flow::FlowParams, foil::Foil; keep = 0)
     # magic numbers from Spalart paper
-    V0 = 10e-4*flow.Uinf
-    D0 = 0.1*foil.chord
-    te = foil.foil[:,1]
-    ds = sqrt.(sum(abs2,wake.xy .- te, dims=1))
-    zs = sqrt.(sum(wake.xy.^2, dims=1))
+    V0 = 10e-4 * flow.Uinf
+    D0 = 0.1 * foil.chord
+    te = foil.foil[:, 1]
+    ds = sqrt.(sum(abs2, wake.xy .- te, dims = 1))
+    zs = sqrt.(sum(wake.xy .^ 2, dims = 1))
 
-    mask = abs.(wake.Γ*wake.Γ').*abs.(zs.-zs')./(abs.(wake.Γ .+ wake.Γ').* (D0.+ds).^1.5.*(D0.+ds').^1.5) .< V0
-        
+    mask = abs.(wake.Γ * wake.Γ') .* abs.(zs .- zs') ./
+           (abs.(wake.Γ .+ wake.Γ') .* (D0 .+ ds) .^ 1.5 .* (D0 .+ ds') .^ 1.5) .< V0
+
     k = 2
     num_vorts = length(wake.Γ)
     # the k here in what to keep
     # to save the last half of a cycle of motion keep = flow.N ÷ 2    
-    while k < num_vorts - keep        
-        j = k+1
-        while j < foil.N +1
-            if mask[k,j]
+    while k < num_vorts - keep
+        j = k + 1
+        while j < foil.N + 1
+            if mask[k, j]
                 # only aggregate vortices of similar rotation
                 if sign(wake.Γ[k]) == sign(wake.Γ[j])
-                    wake.xy[:,j] = (abs(wake.Γ[j]).*wake.xy[:,j] + abs(wake.Γ[k]).*wake.xy[:,k])./(abs(wake.Γ[j] +wake.Γ[k]))
-                    wake.Γ[j] += wake.Γ[k]     
-                    wake.xy[:,k] = [0.0, 0.0]
+                    wake.xy[:, j] = (abs(wake.Γ[j]) .* wake.xy[:, j] +
+                                     abs(wake.Γ[k]) .* wake.xy[:, k]) ./
+                                    (abs(wake.Γ[j] + wake.Γ[k]))
+                    wake.Γ[j] += wake.Γ[k]
+                    wake.xy[:, k] = [0.0, 0.0]
                     wake.Γ[k] = 0.0
-                    mask[k,:] .= 0
+                    mask[k, :] .= 0
                 else
                     k += 1
                 end
             end
-            j +=1
-        end        
-        k += 1       
-    end    
+            j += 1
+        end
+        k += 1
+    end
 
     # clean up the wake struct
-    keepers = findall(x-> x!=0.0, wake.Γ)
+    keepers = findall(x -> x != 0.0, wake.Γ)
     wake.Γ = wake.Γ[keepers]
-    wake.xy = wake.xy[:,keepers]
-    wake.uv = wake.uv[:,keepers]    
+    wake.xy = wake.xy[:, keepers]
+    wake.uv = wake.uv[:, keepers]
     nothing
 end

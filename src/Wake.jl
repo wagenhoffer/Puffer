@@ -1,12 +1,12 @@
 #  Wake struct and related functions
-  #  Wake
-  #  show
-  #  move_wake!
-  #  body_to_wake!
-  #  vortex_to_target
-  #  release_vortex!
-  #  set_edge_strength!
-  #  cancel_buffer_Γ!
+#  Wake
+#  show
+#  move_wake!
+#  body_to_wake!
+#  vortex_to_target
+#  release_vortex!
+#  set_edge_strength!
+#  cancel_buffer_Γ!
 
 mutable struct Wake{T}
     xy::Matrix{T}
@@ -24,17 +24,17 @@ end
 Wake() = Wake([0, 0], 0.0, [0, 0])
 
 #initial with the buffer panel to be cancelled
-function Wake(foil::Foil{T}) where T<:Real
+function Wake(foil::Foil{T}) where {T <: Real}
     Wake{T}(reshape(foil.edge[:, end], (2, 1)), [-foil.μ_edge[end]], [0.0 0.0]')
 end
 
-function Wake(foils::Vector{Foil{T}}) where {T<:Real}
+function Wake(foils::Vector{Foil{T}}) where {T <: Real}
     N = length(foils)
-    xy = zeros(2,N)
+    xy = zeros(2, N)
     Γs = zeros(N)
-    uv = zeros(2,N)
-    for (i,foil) in enumerate(foils)
-        xy[:,i] = foil.edge[:,end]
+    uv = zeros(2, N)
+    for (i, foil) in enumerate(foils)
+        xy[:, i] = foil.edge[:, end]
     end
     Wake{T}(xy, Γs, uv)
 end
@@ -54,7 +54,7 @@ end
 
 Influence of body onto the wake and the edge onto the wake
 """
-function body_to_wake!(wake::Wake, foil::Foil,flow::FlowParams)
+function body_to_wake!(wake::Wake, foil::Foil, flow::FlowParams)
     x1, x2, y = panel_frame(wake.xy, foil.foil)
     nw, nb = size(x1)
     lexp = zeros((nw, nb))
@@ -76,12 +76,12 @@ function body_to_wake!(wake::Wake, foil::Foil,flow::FlowParams)
     nothing
 end
 
-function vortex_to_target(sources::Matrix{T}, targets, Γs, flow) where T <:Real
+function vortex_to_target(sources::Matrix{T}, targets, Γs, flow) where {T <: Real}
     ns = size(sources)[2]
     nt = size(targets)[2]
     vels = zeros(T, (2, nt))
     vel = zeros(T, nt)
-    for i = 1:ns
+    for i in 1:ns
         dx = targets[1, :] .- sources[1, i]
         dy = targets[2, :] .- sources[2, i]
         @. vel = Γs[i] / (2π * sqrt((dx^2 + dy^2)^2 + flow.δ^4))
@@ -99,7 +99,7 @@ function release_vortex!(wake::Wake, foil::Foil)
     wake.uv = [wake.uv .* 0.0 [0.0, 0.0]]
 
     if any(foil.μ_ledge .!= 0)
-        wake.xy = [wake.xy foil.ledge[:,2]]
+        wake.xy = [wake.xy foil.ledge[:, 2]]
         wake.Γ = [wake.Γ..., (foil.μ_ledge[1] - foil.μ_ledge[2])]
         wake.uv = [wake.uv .* 0.0 [0.0, 0.0]]
     end
@@ -118,9 +118,9 @@ function cancel_buffer_Γ!(wake::Wake, foil::Foil)
     nothing
 end
 
-function cancel_buffer_Γ!(wake::Wake, foils::Vector{Foil{T}}) where T <: Real
+function cancel_buffer_Γ!(wake::Wake, foils::Vector{Foil{T}}) where {T <: Real}
     for (i, foil) in enumerate(foils)
-        wake.xy[:, i]= foil.edge[:,2]
+        wake.xy[:, i] = foil.edge[:, 2]
         wake.Γ[i] = -foil.μ_edge[end]
     end
 end
