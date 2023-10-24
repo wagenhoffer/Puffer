@@ -3,9 +3,9 @@ using Puffer
 using Plots
 
 """
-    turn_σ!(foil::Foil,flow::FlowParams, turn)
+    turn_σ!(foil::Foil, flow::FlowParams, turn)
 
-TBW
+This function modifies σ for a discrete turn, ie not part of the kinematics functional signal. 
 """
 function turn_σ!(foil::Foil, flow::FlowParams, turn)
     ff = get_mdpts(([foil._foil[1, :] .- foil.pivot foil._foil[2, :] .+
@@ -13,7 +13,7 @@ function turn_σ!(foil::Foil, flow::FlowParams, turn)
         foil.f,
         foil.k,
         flow.n * flow.Δt)] * rotation(-turn))') .+ foil.LE
-    vel = (foil.col - ff) ./ flow.Δt
+    vel = (foil.col - ff) ./ flow.Δt 
     foil.σs += vel[1, :] .* foil.normals[1, :] + vel[2, :] .* foil.normals[2, :]
     nothing
 end
@@ -23,17 +23,17 @@ begin
     upm = deepcopy(defaultDict)
     upm[:Nt] = 64
     upm[:N] = 64
-    upm[:Ncycles] = 4
+    upm[:Ncycles] = 10
     upm[:Uinf] = 1.0
     upm[:kine] = :make_ang
     upm[:pivot] = 0.0
     upm[:foil_type] = :make_naca
     upm[:thick] = 0.12
     upm[:f] = 1.0
-    upm[:k] = 1.0
+    upm[:k] = 1.25
 
     foil, flow = init_params(; upm...)
-    mass = 5e-1
+    mass = 1.0
     turns = zeros(flow.Ncycles * flow.N)
     wake = Wake(foil)
     Us = zeros(2, flow.Ncycles * flow.N)
@@ -56,7 +56,7 @@ begin
         if i == 1
             U = _propel(foil, flow; U = [0.0, 0.0], mass = mass, turnto = turns[i])
             # Cast this to  2d vel
-            U = [-1.0, 0.0]
+            U = [0.95, 0.0]
         else
             U = _propel(foil,
                 flow;
@@ -95,21 +95,30 @@ begin
         old_phis = [phi'; old_phis[1:2, :]]
         coeffs[:, i] = get_performance(foil, flow, p)
         ###FAKE COEFF Thrust
-        # coeffs[3,i] = -0.2.*cos.(4π.*foil.f.*  i *flow.Δt )
+        # coeffs[3,i] = 0.2.*cos.(4π.*foil.f.*  i *flow.Δt ) .+ 0.2
+        # Make a fake coeff of thrust based on a sinusiodal signal and force it into
+
         ps[:, i] = p
-        f = plot_current(foil, wake)
-        plot!(f, ylims = (-1, 1))
-        plot!(title = "$(U)")
-        frame(anim, f)
+        # f = plot_current(foil, wake)
+        # plot!(f, ylims = (-1, 1))
+        # plot!(title = "$(U)")
+        # frame(anim, f)
     end
-    gif(anim, "./images/self_prop_ang.gif", fps = 10)
+
+    @show maximum(coeffs[3,64:end])
+    @show maximum(Us[1,64:end])
+    # gif(anim, "./images/self_prop_ang.gif", fps = 10)
+    plot(Us[1, 64:end])
 end
+    # MAKE A Plot FOR THE articial thrust signal
+    # t = (flow.Δt):(flow.Δt):(flow.N * flow.Δt * flow.Ncycles)
+    # plot(t, -0.2 .* cos.(4π .* foil.f .* t))
 
 t = (flow.Δt):(flow.Δt):(flow.N * flow.Δt * flow.Ncycles)
-plot(t, -0.2 .* cos.(4π .* foil.f .* t))
+plot(t, 0.2 .* cos.(4π .* foil.f .* t) .+ 0.2)
 
 """
-    trapezoid(f,a,b,n)
+    trapezoid(y, a, b, n)
 
 Apply the trapezoid integration formula for integrand `f` over
 interval [`a`,`b`], broken up into `n` equal pieces. Returns
@@ -124,11 +133,6 @@ function trapezoid(y, a, b, n)
     return T, t, y
 end
 
-"""
-    turn_σ!(foil::Foil,flow::FlowParams, turn)
-
-    modify σ for a discrete turn, ie not part of the kinematics functional signal
-"""
 
 begin
     #scripting

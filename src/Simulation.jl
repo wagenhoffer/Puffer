@@ -1,11 +1,26 @@
 #  Simulation functions
-"""
-    (foil::Foil)(fp::FlowParams)
 
 """
-##TODO:NATE
+    (foil::Foil)(flow::FlowParams)
+
+Advance the foil in flow by one time step. This is the core of the simulation.
+"""
 (foil::Foil)(flow::FlowParams) = _propel(foil, flow)
 
+"""
+    _propel(foil::Foil,
+    flow::FlowParams;
+    forces = nothing,
+    U = [0.0, 0.0],
+    mass = 0.1,
+    turnto = nothing,
+    self_prop = false,)
+
+Does an advancement of the foil in simulation. This is the core of the simulation. 
+Flags are used to determine if the foil is self-propelled or not. If self-propelled,
+the forces are used to determine the new velocity of the foil. Otherwise, the foil
+is advanced by the flow velocity.
+"""
 function _propel(foil::Foil,
     flow::FlowParams;
     forces = nothing,
@@ -28,13 +43,15 @@ function _propel(foil::Foil,
         accel = -forces[3:-1:2] / mass
         U1 = U + accel * flow.Δt
         Δxy = 0.5 * (U + U1) * flow.Δt
+
     else
         U1 = nothing
         Δxy = flow.Uinf .* flow.Δt
     end
-
+    #
     xle1 = [cos(foil.θ + π), sin(foil.θ + π)] .* Δxy
     foil.LE += xle1[:]
+
     if typeof(foil.kine) == Vector{Function}
         h = foil.kine[1](foil.f, flow.n * flow.Δt)
         θ = foil.kine[2](foil.f, flow.n * flow.Δt, -π / 2)
@@ -54,27 +71,9 @@ function _propel(foil::Foil,
     move_edge!(foil, flow)
     flow.n += 1
     U1
+    
 end
 
-# function (foil::Foil)(flow::FlowParams)
-#     #perform kinematics
-#     if typeof(foil.kine) == Vector{Function}
-#         h = foil.kine[1](foil.f, flow.n * flow.Δt)
-#         θ = foil.kine[2](foil.f, flow.n * flow.Δt, -π/2)
-#         rotate_about!(foil, θ)
-#         foil.foil[2, :] .+= h
-#         #Advance the foil in flow
-#         foil.foil .+= [-flow.Uinf, 0] .* flow.Δt .* flow.n
-#     else
-#         foil.foil[2, :] = foil._foil[2, :] .+ foil.kine.(foil._foil[1, :], foil.f, foil.k, flow.n * flow.Δt)
-#         #Advance the foil in flow
-#         foil.foil .+= [-flow.Uinf, 0] .* flow.Δt
-#     end
-#     norms!(foil)
-#     set_collocation!(foil)
-#     move_edge!(foil, flow)
-#     flow.n += 1
-# end
 """
    
 

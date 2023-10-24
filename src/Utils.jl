@@ -84,6 +84,11 @@ function plot_with_normals(foil::Foil)
         quiver = (foil.normals[1, :], foil.normals[2, :]))
 end
 
+"""
+    plot_coeffs(coeffs, flow)
+
+Plot the given coefficients over the given flow parameters.
+"""
 function plot_coeffs(coeffs, flow)
     t = range(0, stop = flow.Ncycles * flow.N * flow.Δt, length = flow.Ncycles * flow.N)
     start = flow.N
@@ -202,3 +207,13 @@ function spalarts_prune!(wake::Wake, flow::FlowParams, foil::Foil; keep = 0)
     wake.uv = wake.uv[:, keepers]
     nothing
 end
+
+
+@recipe function f(::Foil{T}, foil::Foil{T}) where {T}  
+    # x = foil.col[1, :]
+    y = foil.col[2, :]
+    # aspect_ratio --> true
+    seriestype := :path
+    (y,x)
+end
+
