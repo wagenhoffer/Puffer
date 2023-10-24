@@ -216,7 +216,7 @@ end
 	# Define a tolerance for the error
 	tolerance = 0.06 #<_ probably high
     # Perform the simulation
-    data, _= moored_teardrop()
+    data, plt= moored_teardrop()
     cl, cl_sim = data
     # Check the results against the experimental data
     @test length(cl) == length(cl_sim)    

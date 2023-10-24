@@ -1,4 +1,5 @@
 using Puffer
+# include(joinpath("..","src","Puffer.jl"))
 using Plots
 using SpecialFunctions
 using Plots
@@ -10,22 +11,22 @@ cta = [0.20213065147399903 0.25042614936828617 0.3029829502105713 0.349857950210
 ηa= [0.2 0.2517482346754808 0.30069927509014427 0.35104895958533655 0.40139855018028847
     0.6886363220214844 0.6409089660644534 0.6000000000000001 0.5863636779785157 0.5522726440429686]
 begin
-"""
-Boundary-element method for the prediction of performance of flapping foils with leading-edge separation
-Y Pan, X Dong, Q Zhu, DKP Yue - Journal of Fluid Mechanics, 2012
-DOI: https://doi.org/10.1017/jfm.2012.119
-"""
+# """
+# Boundary-element method for the prediction of performance of flapping foils with leading-edge separation
+# Y Pan, X Dong, Q Zhu, DKP Yue - Journal of Fluid Mechanics, 2012
+# DOI: https://doi.org/10.1017/jfm.2012.119
+# """
     pan = deepcopy(defaultDict)
     # pan[:Nt] = Nt
     pan[:N] = 64
 
     pan[:Ncycles] = 5
-    pan[:Ncycles] = 5
+
     pan[:f] = 0.5
     pan[:Uinf] = 0.4
     pan[:kine] = :make_heave_pitch
     pan[:pivot] = 1.0/3.0
-    pan[:thick] = 0.12
+    pan[:thick] = 0.2
     pan[:foil_type] = :make_naca
     θ0 = 0.00 #deg2rad(0.01)
     h0 = 0.01
@@ -45,11 +46,33 @@ DOI: https://doi.org/10.1017/jfm.2012.119
     ck = theo(k)
     @. cl = -2*π^2*St*abs.(ck)*cos(2π.*τ + angle(ck)) - π^2*St*k*sin(2π.*τ)
 
-    shift = -2
+    shift = 0
     plot(τ[flow.N:end], coeffs[2, flow.N+shift:end+shift], marker=:circle, label="BEM Lift")
     plt = plot!(τ[flow.N:end], cl[flow.N:end], label="Theo Lift",lw=3)
 end
-
+begin
+    pan = deepcopy(defaultDict)
+    pan[:N] = 64
+    pan[:Nt] = 64
+    pan[:Ncycles] = 5
+    pan[:f] = 0.5
+    pan[:Uinf] = 0.4
+    pan[:kine] = :make_heave_pitch
+    θ0 = deg2rad(5)
+    h0 = 0.0
+    pan[:motion_parameters] = [h0, θ0]
+    foil, flow = init_params(; pan...)
+    wake = Wake(foil)
+    (foil)(flow)    
+    movie = @animate for i in 1:flow.Ncycles*flow.N
+        time_increment!(flow, foil, wake)        
+        win = (minimum(foil.foil[1, :]') + 3.0*foil.chord / 4.0, maximum(foil.foil[1, :]) + foil.chord * 0.25)
+        win = nothing
+        f = plot_current(foil, wake; window=win)
+        f
+    end
+    gif(movie, "./images/h_$(h0)_p_$(rad2deg(θ0)).gif", fps=30)
+end
 
 begin
     """numerical approach to finding θ given αmax and Strouhal number
@@ -85,10 +108,7 @@ begin
         # Nice steady window for plotting
         win = (minimum(foil.foil[1, :]') - foil.chord / 2.0, maximum(foil.foil[1, :]) + foil.chord * 2)
         #ZOom in on the edge
-        # win = (minimum(foil.foil[1, :]') + 3*foil.chord / 4.0, maximum(foil.foil[1, :]) + foil.chord * 0.1)
-        if i%flow.N == 0
-            spalarts_prune!(wake, flow, foil; keep=flow.N÷2)
-        end
+
         win=nothing
         f = plot_current(foil, wake;window=win)
         f

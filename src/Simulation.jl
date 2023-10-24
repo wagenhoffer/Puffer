@@ -94,28 +94,12 @@ function run_sim(; kwargs...)
     coeffs = zeros(4, steps)
     (foil)(flow)
     for i = 1:steps
-        A, rhs, edge_body = make_infs(foil)
-
-        setσ!(foil, flow)
-        foil.wake_ind_vel = vortex_to_target(wake.xy, foil.col, wake.Γ, flow)
-        normal_wake_ind = sum(foil.wake_ind_vel .* foil.normals, dims=1)'
-        foil.σs -= normal_wake_ind[:]
-        buff = edge_body * foil.μ_edge[1]
-        foil.μs = A \ (-rhs*foil.σs - buff)[:]
-        set_edge_strength!(foil)
-        cancel_buffer_Γ!(wake, foil)
-        body_to_wake!(wake, foil, flow)
-        wake_self_vel!(wake, flow)
+        time_increment!(flow, foil, wake)
         phi =  get_phi(foil, wake)
         p = panel_pressure(foil, flow, old_mus, old_phis, phi)
         old_mus = [foil.μs'; old_mus[1:2,:]]
         old_phis = [phi'; old_phis[1:2,:]]
-        coeffs[:,i] .= get_performance(foil, flow, p)
-             
-        move_wake!(wake, flow)
-        release_vortex!(wake, foil)
-        (foil)(flow)
-
+        coeffs[:,i] .= get_performance(foil, flow, p)             
     end
     foil, flow,  wake, coeffs 
 end
@@ -123,10 +107,12 @@ end
 
 function get_performance(foil, flow, p)
     dforce = repeat(-p .* foil.panel_lengths', 2, 1) .* foil.normals
-    dpress = sum(dforce .* foil.panel_vel, dims=2)
+
     force  = sum(dforce, dims=2)
     lift   = -force[2]
     thrust = force[1]
+
+    dpress = sum(dforce .* foil.panel_vel, dims=2)
     power = sum(dpress, dims = 1)[1]
 
     [sum(sqrt.(force .^ 2)), 
@@ -275,12 +261,10 @@ function get_qt(foil::Foil)
     acc_lens = 0.5 * foil.panel_lengths[1:end-1] + 0.5 * foil.panel_lengths[2:end]
     acc_lens = [0; cumsum(acc_lens)]
 
-    # B = BSplineBasis(BSplineOrder(4), acc_lens[:])
     S = interpolate(acc_lens, foil.μs, BSplineOrder(3))
     dmu = Derivative(1) * S
     dmudl = -dmu.(acc_lens)
 
-    #TODO: SPLIT σ into local and inducec? it is lumped into one now
-    qt = repeat(dmudl', 2, 1) .* foil.tangents #+ repeat(foil.σs',2,1).*foil.normals
+    qt = repeat(dmudl', 2, 1) .* foil.tangents
     qt
 end

@@ -194,7 +194,7 @@ function panel_pressure(foil::Foil, flow,  old_mus, old_phis, phi; U_b = nothing
     qt .+= repeat(foil.σs', 2, 1) .* foil.normals
 
     p_s  = sum((qt  + foil.wake_ind_vel) .^ 2, dims=1) /2.0
-    p_us = dmudt' + dphidt' - sum(([U_b; 0] .+ foil.panel_vel) .* qt, dims=1) 
+    p_us = dmudt' + dphidt' - sum(([U_b; 0] .+ foil.panel_vel) .* (qt .+ foil.wake_ind_vel), dims=1) 
     # Calculate the total pressure coefficient
     """
     ∫∞→Px1 d(∇×Ψ)/dt dC + dΦ/dt|body - (VG + VGp + (Ωxr))⋅∇(Φ + ϕ) + 1/2||∇Φ +(∇×Ψ)|^2  = Pinf - Px1 /ρ
