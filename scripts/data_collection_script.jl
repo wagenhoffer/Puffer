@@ -59,9 +59,9 @@ begin
     """
     # Define parameter ranges
     T = Float32
-    Strouhal_values = 0.1:0.1:0.3 .|> T
-    reduced_freq_values = 0.1:0.1:0.3 .|> T
-    ks = 0.1:0.1:0.3 .|> T
+    Strouhal_values = LinRange{T}(0.0125, 0.4, 5)
+    reduced_freq_values = LinRange{T}(0.4, 4, 5)
+    ks = LinRange{T}(0.35, 2.0, 5)
 
     allofit = Vector{DataFrame}()
     # Nested loops to vary parameters
@@ -77,6 +77,7 @@ begin
                 ang[:f] = reduced_freq * ang[:Uinf]
                 ang[:kine] = :make_ang
                 ang[:T] = T
+                ang[:k] = k
                 a0 = St * ang[:Uinf] / ang[:f]
                 ang[:motion_parameters] = [a0]
                 T = ang[:T]

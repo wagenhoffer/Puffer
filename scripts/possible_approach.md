@@ -5,7 +5,7 @@ I have published a paper that covers a lot of the material implemented here [1] 
 
 The first paper [1] specifically talks about the traveling wave form, anguilliform is already implemented (the other is a few minutes to set up), and how it produces thrust.
 The studies use three big non-dimensional numbers that we care about variation of to make a surrogate of a "physical" swimmer. 
-The Strouhal number  $St = \frac{fa_0}{U_|inf}$ , reduced frequency $f* = \frac{fc}{U_\inf}$ and ND wavenumber $k* = kc$. 
+The Strouhal number  $St = \frac{fa_0}{U_\inf}$ , reduced frequency $f* = \frac{fc}{U_\inf}$ and ND wavenumber $k* = kc$. 
 Here $f$ is frequency, $a_0$ is amplitude of motion at the trailing edge, $$ is chord or length of the swimmer, $k$ is the wavenumber of the wave traveling down the chord of the swimmer (think $\lambda$ if that helps) and $U_\inf$ is the freestream velocity (to be replaced with the self-propelled velocity in an upcoming pull). 
 
 In the paper, the ranges of $0.25 \le f* \le 4$ and $0.025 \le St \le 0.4$ and $0.35 \le k* \le 2$. You only need to adjust the values of 
