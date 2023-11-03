@@ -6,6 +6,8 @@ images/*.gif
 #CSV files for data storage
 *.csv
 /data/*.csv
+*.jls
+/data/*.jls
 #coverage files
 *.cov
 *.info
