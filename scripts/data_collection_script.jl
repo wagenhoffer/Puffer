@@ -59,62 +59,76 @@ begin
     """
     # Define parameter ranges
     T = Float32
-    Strouhal_values = LinRange{T}(0.0125, 0.4, 5)
-    reduced_freq_values = LinRange{T}(0.4, 4, 5)
+    reduced_freq_values = LinRange{T}(0.25, 4, 5)
     ks = LinRange{T}(0.35, 2.0, 5)
 
     allofit = Vector{DataFrame}()
     # Nested loops to vary parameters
-    for St in Strouhal_values
-        for reduced_freq in reduced_freq_values
-            for k in ks
-                # Set motion parameters
-                ang = deepcopy(defaultDict)
-                ang[:N] = 64
-                ang[:Nt] = 64
-                ang[:Ncycles] = 5 # number of cycles
-                ang[:Uinf] = 1.0
-                ang[:f] = reduced_freq * ang[:Uinf]
-                ang[:kine] = :make_ang
-                ang[:T] = T
-                ang[:k] = k
-                a0 = St * ang[:Uinf] / ang[:f]
-                ang[:motion_parameters] = [a0]
-                T = ang[:T]
-                # Initialize Foil and Flow objects
-                foil, fp = init_params(; ang...)
-                wake = Wake(foil)
-                (foil)(fp)
 
-                # Perform simulations and save results
-                old_mus, old_phis = zeros(3, foil.N), zeros(3, foil.N)
-                phi = zeros(foil.N)
-                # Lets grab this data to start
-                # [foil.col'  foil.normals' foil.tangents' foil.wake_ind_vel' foil.panel_vel' U_inf]
-                datas = DataFrame(St = T[],
-                    reduced_freq = T[],
-                    k = T[],
-                    U_inf = T[],
-                    t = T[],
-                    σs = Matrix{T},
-                    panel_velocity = Matrix{T},
-                    position = Matrix{T},
-                    normals = Matrix{T},
-                    wake_ind_vel = Matrix{T},
-                    tangents = Matrix{T},
-                    μs = T[],
-                    pressure = T[])
+    for reduced_freq in reduced_freq_values
+        for k in ks
+            # Set motion parameters
+            ang = deepcopy(defaultDict)
+            ang[:N] = 64
+            ang[:Nt] = 64
+            ang[:Ncycles] = 5 # number of cycles
+            ang[:Uinf] = 1.0
+            ang[:f] = reduced_freq * ang[:Uinf]
+            ang[:kine] = :make_ang
+            ang[:T] = T
+            ang[:k] = k
+            a0 = 0.1 
+            @show reduced_freq*a0
+            ang[:motion_parameters] = [a0]
+            T = ang[:T]
+            # Initialize Foil and Flow objects
+            foil, flow = init_params(; ang...)
+            wake = Wake(foil)
+            (foil)(flow)
 
-                for i in 1:(fp.Ncycles * foil.N)
-                    time_increment!(fp, foil, wake)
-                    phi = get_phi(foil, wake)
-                    p = panel_pressure(foil, fp, old_mus, old_phis, phi)
-                    old_mus = [foil.μs'; old_mus[1:2, :]]
-                    old_phis = [phi'; old_phis[1:2, :]]
+            # Perform simulations and save results
+            old_mus, old_phis = zeros(3, foil.N), zeros(3, foil.N)
+            phi = zeros(foil.N)
+            # Lets grab this data to start
+            # [foil.col'  foil.normals' foil.tangents' foil.wake_ind_vel' foil.panel_vel' U_inf]
+            datas = DataFrame(St = T[],
+                reduced_freq = T[],
+                k = T[],
+                U_inf = T[],
+                t = T[],
+                σs = Matrix{T},
+                panel_velocity = Matrix{T},
+                position = Matrix{T},
+                normals = Matrix{T},
+                wake_ind_vel = Matrix{T},
+                tangents = Matrix{T},
+                μs = T[],
+                pressure = T[])
 
-                    if i == 1
-                        datas = DataFrame(St = [St],
-                            reduced_freq = [reduced_freq],
+            for i in 1:(flow.Ncycles * foil.N)
+                time_increment!(flow, foil, wake)
+                phi = get_phi(foil, wake)
+                p = panel_pressure(foil, flow, old_mus, old_phis, phi)
+                old_mus = [foil.μs'; old_mus[1:2, :]]
+                old_phis = [phi'; old_phis[1:2, :]]
+
+                if i == 1
+                    datas = DataFrame(reduced_freq = [reduced_freq],
+                        k = [k],
+                        U_inf = [flow.Uinf],
+                        t = [flow.n * flow.Δt],
+                        σs = [foil.σs],
+                        panel_vel = [foil.panel_vel],
+                        position = [foil.col],
+                        normals = [foil.normals],
+                        wake_ind_vel = [foil.wake_ind_vel],
+                        tangents = [foil.tangents],
+                        μs = [foil.μs],
+                        pressure = [p])
+
+                else
+                    append!(datas,
+                        DataFrame(reduced_freq = [reduced_freq],
                             k = [k],
                             U_inf = [flow.Uinf],
                             t = [flow.n * flow.Δt],
@@ -125,30 +139,13 @@ begin
                             wake_ind_vel = [foil.wake_ind_vel],
                             tangents = [foil.tangents],
                             μs = [foil.μs],
-                            pressure = [p])
-
-                    else
-                        append!(datas,
-                            DataFrame(St = [St],
-                                reduced_freq = [reduced_freq],
-                                k = [k],
-                                U_inf = [flow.Uinf],
-                                t = [flow.n * flow.Δt],
-                                σs = [foil.σs],
-                                panel_vel = [foil.panel_vel],
-                                position = [foil.col],
-                                normals = [foil.normals],
-                                wake_ind_vel = [foil.wake_ind_vel],
-                                tangents = [foil.tangents],
-                                μs = [foil.μs],
-                                pressure = [p]))
-                    end
+                            pressure = [p]))
                 end
-
-                push!(allofit, datas)
             end
+
+            push!(allofit, datas)
         end
-    end
+    end    
     path = joinpath("data", "starter_data.jls")
 
     allofit = vcat(allofit...)
