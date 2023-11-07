@@ -27,7 +27,7 @@ function _propel(foil::Foil,
     U = [0.0, 0.0],
     mass = 0.1,
     turnto = nothing,
-    self_prop = false,)
+    self_prop = false)
     #only effects the position of the LE with the forces defining the new velocity of self-propellsion
     #perform kinematics    
 
@@ -70,8 +70,7 @@ function _propel(foil::Foil,
     set_collocation!(foil)
     move_edge!(foil, flow)
     flow.n += 1
-    U1
-    
+    U1    
 end
 
 """
