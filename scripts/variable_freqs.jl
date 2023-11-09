@@ -47,13 +47,51 @@ begin
     
     movie = @animate for n in 1:128
         if n < 32
-            nt = n
+            Δt = flow.Δt
         elseif n<64
-            nt = n*2
+            Δt = flow.Δt*2
         else
-            nt = n/2
+            Δt = flow.Δt/2
         end
-        out = foil.kine.(foil.col[1, :], foil.f, foil.k, nt * flow.Δt)
+        out = foil.kine.(foil.col[1, :], foil.f, foil.k, n * Δt)
+        p = plot(out[1:32],  label = "")
+        title!("$n")
+        ylims!(-0.1,0.1)
+        p
+    end
+    
+    gif(movie, "./images/variable_freq.gif", fps = 10)
+end
+
+begin
+    
+    movie = @animate for n in 1:128
+        if n < 32
+            f = foil.f
+        elseif n<64
+            f = foil.f*2
+        else
+            f = foil.f/2
+        end
+        out = foil.kine.(foil.col[1, :], f, foil.k, n * flow.Δt)
+        p = plot(out[1:32],  label = "")
+        title!("$n")
+        ylims!(-0.1,0.1)
+        p
+    end
+    
+    gif(movie, "./images/variable_freq.gif", fps = 10)
+end
+begin
+    num = 128
+    var = sin.(2π.*LinRange(0,1,num))
+
+    movie = @animate for (n,f) in enumerate(var)
+        (foil)(flow)
+        foil.f = f
+        # need to ensure that the velocity from panels makes sense and then
+        # we can move to pressure
+        out = foil.kine.(foil.col[1, :], foil.f, foil.k, n * flow.Δt)
         p = plot(out[1:32],  label = "")
         title!("$n")
         ylims!(-0.1,0.1)
