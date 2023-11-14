@@ -149,7 +149,7 @@ function find_Us(;U_init = 1.0, f=1.0, k=1.0, mass = 1.0, Ncycles = 3)
     coeffs = zeros(4, flow.Ncycles * flow.N)
     ps = zeros(foil.N, flow.Ncycles * flow.N)
 
-    # trs = 0.0
+
 
     for i in 1:(flow.Ncycles * flow.N)
         if flow.n != 1
@@ -224,7 +224,7 @@ begin
     T = Float32
     N = 3
     fs = LinRange{T}(0.5, 4, N)
-    ks = LinRange{T}(0.25, 2.0, N)
+    ks = [0.5, 1.0, 1.5] .|>T
     masses = [2.0, 1.0, 0.5] .|>T
     Uinits = zeros(N,N,N)
     for (l,mass) in enumerate(masses)
@@ -240,8 +240,8 @@ end
 
 begin
     #scripting
-    (f, k, mass) = (0.5f0, 2.0f0, 2.0f0)
-    U_init = π
+    (f, k, mass) = (0.5f0, 2.0f0, 1.0f0)
+    U_init = -0.1
     upm = deepcopy(defaultDict)
     upm[:Nt] = 64
     upm[:N] = 64
@@ -320,6 +320,15 @@ begin
     # f
     gif(anim, "./images/handp.gif", fps = 30)
 end
+
+function cycle_averages(coeffs,flow::FlowParams)
+    "given a set of coefficients, average them over a cycle"
+    cycles = [coeffs[:,i*flow.N+1:(i+1)*flow.N] for i in 0:flow.Ncycles-1]
+   hcat([mean(cycle, dims=2) for cycle in cycles]...)
+end
+    
+
+
 function shanks(as)
     "Shanks transformation for accelerating convergence of a sequence"
     N = length(as)

@@ -39,7 +39,7 @@ function _propel(foil::Foil,
     end
 
     if self_prop
-        #force, lift,-> thrust<-, power; only thrust
+        #force, lift,-> thrust<-, power ; but use [thrust, lift] for 2d data
         accel = -forces[3:-1:2] / mass
         U1 = U + accel * flow.Δt
         Δxy = 0.5 * (U + U1) * flow.Δt
