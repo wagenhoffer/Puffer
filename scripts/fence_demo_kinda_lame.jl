@@ -1,6 +1,5 @@
 # include("../src/BemRom.jl")
 using Puffer
-
 using Plots
 using Dierckx
 
@@ -33,8 +32,9 @@ end
 
 begin
     @show flow.n
+    global wake
     movie = @animate for i in 1:(flow.N * 3)
-        dest = sdf_fence!(wake, foil, flow)
+        dest = sdf_fence(wake, foil, flow)
         wake.xy = dest
         time_increment!(flow, foil, wake)
         a = plot_current(foil, wake)
@@ -42,6 +42,7 @@ begin
     end
     gif(movie, "fence.gif")
 end
+
 
 begin
     plot(nfoil[1, :], top.(nfoil[1, :]))
