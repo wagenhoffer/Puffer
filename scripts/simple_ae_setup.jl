@@ -5,15 +5,18 @@ using Flux
 using Flux: onehotbatch, onecold, crossentropy, throttle
 using Statistics
 
-# Define the number of signals
-N = 4
-# Define the time vector
-dt = 0.01
-t = LinRange(0,2π,128)
+"""
+    sines(x; coeffs = ones(N))
 
-# Initialize the signal
-coeffs = 1.0 ./[4, 3, 2, 1]
+    Compute a signal based on a sum of sinusoids.
 
+    # Arguments
+    - `x`: Input vector.
+    - `coeffs`: Coefficients for the sinusoids.
+
+    # Returns
+    - Computed signal.
+"""
 function sines(x; coeffs = ones(N))
     a = one(eltype(x))
     result = zero(eltype(x))
@@ -21,90 +24,131 @@ function sines(x; coeffs = ones(N))
         result += coeffs[j] * sin(a * x)                
         a += one(eltype(x))
     end
+    result ./ N
+end
+
+function powers(x; coeffs = ones(N))    
+    result = zero(eltype(x))
+    for j = 1:N        
+        result += coeffs[j] *x^(j-1)        
+    end
     result
 end
-signal = sines.(t;coeffs = coeffs)
 
-# Plot the signal
-plot(t, signal ,label="signal")
-plot!(t,sines.(t;coeffs=coeffs), label="sines")
-# Calculate the derivative of the signal
-derivative = [ForwardDiff.derivative(_t->sines(_t;coeffs=coeffs),_t) for _t in t]
+function build_ae(input_size, hidden_size = 8, activation = tanh)
+    encoder = Chain(Dense(input_size, hidden_size, activation))        
+    decoder = Chain(Dense(hidden_size, input_size, activation))  
+    Chain(encoder = encoder,decoder= decoder)   
+end
 
-# Plot the derivative
-plot!(t, derivative ,label="Forward Diff")
 
-dydt = diff(sines.(t;coeffs=coeffs))./dt
-plot!(t[1:end-1], dydt, label = "CD")
+function ExpoRange(start, stop) 
+    start = log2(start) .|> Int
+    stop = log2(stop) .|> Int
+    steps = stop - start + 1
+    exp2.(LinRange(start, stop, steps)).|>ceil.|>Int
+end
+ExpoRange(4,128)
 
-# We have shown that the CD and FD methods are equivalent. We will use the FD method to calculate the derivative of the signal.
-# Now to collect a gang of signals and their derivatives to train the neural network
+function build_ae_layers(layer_sizes, activation = tanh)    
+    decoder = Chain([Dense(layer_sizes[i+1], layer_sizes[i], activation) 
+                    for i = length(layer_sizes)-1:-1:1]...)    
+    encoder = Chain([Dense(layer_sizes[i], layer_sizes[i+1], activation)
+                    for i = 1:length(layer_sizes)-1]...)
+    Chain(encoder = encoder, decoder = decoder)
+end
+autoencoder = build_ae_layers([length(t) length(t)÷2 4])
 
+
+#COLLECT Data
 # Define the number of signals to collect
-step = 0.25
-as = 0:step:1
-bs = 0:step:1
-cs = 0:step:1
-ds = 0:step:1
+t = LinRange(-1,1,64)
+step = 0.125
+as = -0.25:step:0.25
+bs = -0.25:step:0.25
+cs = -0.25:step:0.25
+ds = -0.25:step:0.25
+N = 4 
 
 ys = zeros(length(as)*length(bs)*length(cs)*length(ds), length(t))
 dys = zeros(length(as)*length(bs)*length(cs)*length(ds), length(t))
+sine_coeff_dict = Dict()
 index = 1
 for (i,a) in enumerate(as), (j,b) in enumerate(bs), (k,c) in enumerate(cs), (l,d) in enumerate(ds)
     coeffs = [a,b,c,d]
-    ys[index, :] = sines.(t;coeffs=coeffs)
+    sine_coeff_dict[index] = coeffs
+    ys[index, :] = sines.(t; coeffs=coeffs)
     dys[index, :] = [ForwardDiff.derivative(_t->sines(_t;coeffs=coeffs),_t) for _t in t]
     index += 1
 end
+plot(ys', label="")
+
+yps = zeros(length(as)*length(bs)*length(cs)*length(ds), length(t))
+dyps = zeros(length(as)*length(bs)*length(cs)*length(ds), length(t))
+poly_coeff_dict = Dict()
+index = 1 
+for (i,a) in enumerate(as), (j,b) in enumerate(bs), (k,c) in enumerate(cs), (l,d) in enumerate(ds)
+    coeffs = [a,b,c,d]
+    poly_coeff_dict[index] = coeffs
+    yps[index, :] = powers.(t;coeffs=coeffs)
+    dyps[index, :] = [ForwardDiff.derivative(_t->powers(_t;coeffs=coeffs),_t) for _t in t]
+    index += 1
+end
+coeff_dict = Dict()
+coeff_dict["sines"] = sine_coeff_dict
+coeff_dict["polynomials"] = poly_coeff_dict
+
+""" 
+Put both datasets into a dataloader
+"""
 
 
-"""Write a simple AutoEncoder to learn the signal and then to learn
-the derivative of the signal"""
-
-
-# Encoder
-encoder = Chain(
-    Dense(length(t), 64, relu),
-    Dense(64, 8, relu),
-    Dense(8, 4,relu )
-)
-
-# Decoder
-decoder = Chain(
-    Dense(4,8,relu),
-    Dense(8, 64, relu),
-    Dense(64, length(t), relu)
-)
-
-# Autoencoder
-autoencoder = Chain(encoder, decoder)
-
-# autoencoder = Dense(length(t), length(t), relu)
-#test a signal
+dataloader =    DataLoader((y=vcat(ys,yps)'.|>Float32, yp=vcat(dys, dyps)'.|>Float32), batchsize=64, shuffle=true)
+# dataloader = DataLoader((yps,dyps), batchsize=64, shuffle=true)
+autoencoder = build_ae(length(t), 16 )
+autoencoder = build_ae_layers([length(t), length(t)÷2, 4])
 @assert autoencoder(ys[42,:]) |>size == size(dys[42,:])
-λ = 1e-3
-errorl2(x, y) = Flux.mse(autoencoder(x), y) # + λ*sum(abs, Flux.params(autoencoder))
 
 
-# Assuming `dataset` is your data and `batchsize` is the size of your batches
-dataloader = DataLoader((data=ys'.|>Float32, label=dys'.|>Float32), batchsize=32, shuffle=true)
+λ = 1e-2
+errorl2(x, y) = Flux.mse(x, y) 
+errorLA(x, y) = norm(x-y,2)/norm(y,2)
+pen_l1(x) = sum(abs2, x)/2
+errorLasso(m,x,y) = Flux.mse(x, y) + λ.*sum(pen_l1, Flux.params(m))
+
+
+@time errorLasso(autoencoder, ys[42,:], dys[42,:])
 opt_state = Flux.setup(Adam(0.01), autoencoder)
 
 losses = []
 for epoch in 1:1_000
     for (x, y) in dataloader
-        los, grads = Flux.withgradient(autoencoder) do m
+        loss = 0.0
+        grads = Flux.gradient(autoencoder) do m
             # Evaluate model and loss inside gradient context:
-            y_hat = m(x)
-            errorl2(y_hat, y)
+            loss = errorLA(m(x), y) #+ λ.*sum(pen_l2, Flux.params(m))
         end
         Flux.update!(opt_state, autoencoder, grads[1])
-        push!(losses, los)  # logging, outside gradient context
+        push!(losses, loss)  # logging, outside gradient context
+    end
+    if epoch % 20 == 0
+        println("Epoch: $epoch, Loss: $(losses[end])")
     end
 end
 
-plot(losses; xaxis=(:log10, "iteration"),
-    yaxis="loss", label="per batch")
+# Plot the loss function and a sample of reconstructed signals; rerun to see how its doing
+begin
+    which = rand(1:size(dataloader.data.y,2))
+    dataset = which <= size(ys,1) ? "sines" : "polynomials"
+    @show which, dataset , coeff_dict[dataset][which % 625]
+    a = plot(losses; xaxis=(:log10, "iteration"),
+        yaxis="loss", label="per batch")    
+    b = plot(dataloader.data.yp[:,which], label="signal")
+    @show Flux.mse(autoencoder(dataloader.data.y[:,which]), dataloader.data.yp[:,which])
+    @show norm(autoencoder(dataloader.data.y[:,which])- dataloader.data.yp[:,which],2)/norm(dataloader.data.yp[:,which],2)
+    title!(b, dataset)
+    plot!(b, autoencoder(dataloader.data.y[:,which]), label="reconstructed signal")
+    plot(a,b, size=(1200,800))
+end
 
-plot(dys[42,:], label="signal")
-plot!(autoencoder(ys[42,:]), label="reconstructed signal")
+
