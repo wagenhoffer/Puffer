@@ -17,7 +17,7 @@ include("./Panel.jl")
 export source_inf,
     doublet_inf, get_panel_vels, get_panel_vels!, panel_frame, get_circulationsm
 export make_infs,
-    set_edge_strength!, setσ!, turn_σ!, panel_pressure, edge_to_body, get_mdpts, set_ledge_strength!,
+    set_edge_strength!, setσ!, turn_σ!, panel_pressure, edge_to_body, get_mdpts, set_ledge_strength!
 
 include("./Simulation.jl")
 export _propel, run_sim, get_performance, time_increment!, solve_n_update!
