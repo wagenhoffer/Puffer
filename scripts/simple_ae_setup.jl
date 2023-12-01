@@ -4,7 +4,17 @@ using Flux.Data: DataLoader
 using Flux
 using Flux: onehotbatch, onecold, crossentropy, throttle
 using Statistics
+using LinearAlgebra
+using CUDA
 
+# GPU config
+if CUDA.has_cuda()
+    dev = gpu
+    @info "Training on GPU"
+else
+    dev = cpu
+    @info "Training on CPU"
+endN, *BS
 """
     sines(x; coeffs = ones(N))
 
@@ -57,18 +67,18 @@ function build_ae_layers(layer_sizes, activation = tanh)
                     for i = 1:length(layer_sizes)-1]...)
     Chain(encoder = encoder, decoder = decoder)
 end
-autoencoder = build_ae_layers([length(t) length(t)÷2 4])
 
 
 #COLLECT Data
 # Define the number of signals to collect
 t = LinRange(-1,1,64)
-step = 0.125
+
+step = 0.125/2.0
 as = -0.25:step:0.25
 bs = -0.25:step:0.25
 cs = -0.25:step:0.25
 ds = -0.25:step:0.25
-N = 4 
+N =4
 
 ys = zeros(length(as)*length(bs)*length(cs)*length(ds), length(t))
 dys = zeros(length(as)*length(bs)*length(cs)*length(ds), length(t))
@@ -103,16 +113,16 @@ Put both datasets into a dataloader
 """
 
 
-dataloader =    DataLoader((y=vcat(ys,yps)'.|>Float32, yp=vcat(dys, dyps)'.|>Float32), batchsize=64, shuffle=true)
+dataloader =    DataLoader((y=vcat(ys,yps)'.|>Float32, yp=vcat(dys, dyps)'.|>Float32), batchsize=128, shuffle=true)
 # dataloader = DataLoader((yps,dyps), batchsize=64, shuffle=true)
-autoencoder = build_ae(length(t), 16 )
-autoencoder = build_ae_layers([length(t), length(t)÷2, 4])
+autoencoder = build_ae(length(t), 4 )
+autoencoder = build_ae_layers([length(t), length(t)÷2, 4]) |> dev
 @assert autoencoder(ys[42,:]) |>size == size(dys[42,:])
 
 
 λ = 1e-2
-errorl2(x, y) = Flux.mse(x, y) 
-errorLA(x, y) = norm(x-y,2)/norm(y,2)
+errorl2(x, y) = Flux.mse(x, y; agg = mean) 
+errorLA(x, y) = norm(x-y,2)/norm(y,2) |> dev
 pen_l1(x) = sum(abs2, x)/2
 errorLasso(m,x,y) = Flux.mse(x, y) + λ.*sum(pen_l1, Flux.params(m))
 
@@ -121,17 +131,22 @@ errorLasso(m,x,y) = Flux.mse(x, y) + λ.*sum(pen_l1, Flux.params(m))
 opt_state = Flux.setup(Adam(0.01), autoencoder)
 
 losses = []
-for epoch in 1:1_000
+@time for epoch in 1:1_000
     for (x, y) in dataloader
-        loss = 0.0
+        x = x |> dev
+        y = y |> dev
+        ls = 0.0
         grads = Flux.gradient(autoencoder) do m
             # Evaluate model and loss inside gradient context:
-            loss = errorLA(m(x), y) #+ λ.*sum(pen_l2, Flux.params(m))
+            ls = errorl2(m(x), y) #+ λ.*sum(pen_l2, Flux.params(m))
+            # loss = errorLA(m(x), y) #+ λ.*sum(pen_l2, Flux.params(m))
+            # ls = errorLasso(m,x,y)
+            # @show grads|>size
         end
         Flux.update!(opt_state, autoencoder, grads[1])
-        push!(losses, loss)  # logging, outside gradient context
+        push!(losses, ls)  # logging, outside gradient context
     end
-    if epoch % 20 == 0
+    if epoch % 100 == 0
         println("Epoch: $epoch, Loss: $(losses[end])")
     end
 end
@@ -140,15 +155,17 @@ end
 begin
     which = rand(1:size(dataloader.data.y,2))
     dataset = which <= size(ys,1) ? "sines" : "polynomials"
-    @show which, dataset , coeff_dict[dataset][which % 625]
+    @show which, dataset , coeff_dict[dataset][which % size(ys,2)]
     a = plot(losses; xaxis=(:log10, "iteration"),
         yaxis="loss", label="per batch")    
     b = plot(dataloader.data.yp[:,which], label="signal")
-    @show Flux.mse(autoencoder(dataloader.data.y[:,which]), dataloader.data.yp[:,which])
+    @show Flux.mse(autoencoder(dataloader.data.y[:,which]|>cpu)|>cpu, dataloader.data.yp[:,which]|>cpu)|>cpu
     @show norm(autoencoder(dataloader.data.y[:,which])- dataloader.data.yp[:,which],2)/norm(dataloader.data.yp[:,which],2)
     title!(b, dataset)
     plot!(b, autoencoder(dataloader.data.y[:,which]), label="reconstructed signal")
     plot(a,b, size=(1200,800))
 end
 
-
+errorLA(autoencoder(ys[42,:]), dys[42,:])
+errorl2(autoencoder(ys[42,:]), dys[42,:])
+errorLasso(autoencoder, ys[42,:], dys[42,:])
