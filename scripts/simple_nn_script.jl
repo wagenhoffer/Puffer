@@ -5,6 +5,7 @@ data follows the same shape as the data collected in that file.
 """
 
 using Flux
+using Flux: params
 using DataDrivenDiffEq, DataDrivenSR
 using Random, Statistics
 using Surrogates, SurrogatesFlux
@@ -26,6 +27,7 @@ model = Chain(enc = Chain(Dense(N, N ÷ 2, Flux.relu),
     dec = Chain(Dense(N ÷ 8, N ÷ 4, Flux.relu),
         Dense(N ÷ 4, N ÷ 2, Flux.relu),
         Dense(N ÷ 2, N, Flux.relu)))
+
 model(foil.σs) #does this kick out numbers?
 # """ We have implemented named tuples for our model. This means we can easily 
 #     process portions of our model. This will be useful when writing new loss functions.
@@ -44,12 +46,17 @@ freqs = data[:, :reduced_freq]
 ks    = data[:,:k]
 for row in eachrow(data)
     U_inf = repeat([-row.U_inf, 0.0]', N)
+    freaks = repeat([row.reduced_freq, row.reduced_freq]', N)
     # DataFrame(St, reduced_freq, wave_number, U_inf,
     # σ , panel_velocity , position,
     # normals, wake_vel , tangents)
-    x_in = [row.position' row.normals' row.wake_ind_vel' row.panel_vel' U_inf]
-    x_in = reshape(x_in, N, 2, 5, 1) #shape the data to look like channels
-    σs = isnothing(σs) ? row.σs : hcat(σs, row.σs) #<-- scale the σs with f*
+    x_in = [row.position' row.normals' row.wake_ind_vel' row.panel_vel' U_inf freaks]
+    x_in = reshape(x_in, N, 2, 6, 1) #shape the data to look like channels
+    if row.reduced_freq < 1.0
+        σs = isnothing(σs) ? row.σs.*row.reduced_freq^2 : hcat(σs, row.σs.*row.reduced_freq^2) #<-- scale the σs with f*    
+    else            
+        σs = isnothing(σs) ? row.σs./row.reduced_freq^2 : hcat(σs, row.σs./row.reduced_freq^2) #<-- scale the σs with f*
+    end
     inputs = isnothing(inputs) ? x_in : cat(inputs, x_in; dims = 4)
 end
 
@@ -57,25 +64,26 @@ BS = 64
 dataloader = DataLoader((inputs, σs), batchsize = BS, shuffle = true)
 #WHCN -> width height channels number
 @show inputs |> size
+w,h,c,n = size(inputs)
 conv_layers = Chain(
-    Conv((3, 3), 5=>1, pad=(1,1), Flux.relu),
+    Conv((3, 3), c=>1, pad=(1,1), Flux.relu),
     MaxPool((1,2)),
     x-> reshape(x, (size(x,1),size(x, 4))))
 
 conv_layers(inputs[:, :, :, 1:BS]) |> size
 
 # Define the loss function
-loss(x, y) = Flux.mse(model(x), y)
+lossError(x, y) = Flux.mse(model(x), y)
 
 """ Now you have to do the hard part. Split up the data and train the network -> Dataloader might be useful. The current network `conv_layer` may not have enough layers,
 feel free to expand on that.  """
 
 errmse(x, y) = Flux.mse(x, y; agg = mean) 
 
-opt_state = Flux.setup(Adam(0.01), conv_layers)
-plot((σs./maximum(abs.(σs),dims=1))', label="")
+opt_state = Flux.setup(Adam(0.1), conv_layers)
+
 losses = []
-@time for epoch in 1:1_000
+@time for epoch in 1:1_00
     for (x, y) in dataloader
         x = x 
         y = y 
@@ -90,6 +98,12 @@ losses = []
         println("Epoch: $epoch, Loss: $(losses[end])")
     end
 end
+begin
+    which = rand(1:size(dataloader.data[1],4))
+    plot(conv_layers(dataloader.data[1][:,:,:,which:which]), label="Reconstructed")
+    plot!(dataloader.data[2][:,which], label="Truth")
+end
+
 
 
 # Attempt again, but with using dense networks
@@ -106,13 +120,13 @@ errmse(x, y) = Flux.mse(x, y; agg = mean)
 opt_state = Flux.setup(Adam(0.01), model)
 ddataloader = DataLoader((dinputs, σs), batchsize = BS, shuffle = true)
 losses = []
-@time for epoch in 1:1_000
+@time for epoch in 1:10_000
     for (x, y) in ddataloader
         x = x 
         y = y 
         ls = 0.0
         grads = Flux.gradient(model) do m
-            ls = errmse(m(x), y) #+ λ.*sum(pen_l2, Flux.params(m))
+            ls = errmse(m(x), y) + λ.*sum(abs2,m[end].weight)#sum(x->sum(abs2, x), params(m))
         end
         Flux.update!(opt_state, model, grads[1])
         push!(losses, ls)  # logging, outside gradient context
@@ -154,10 +168,12 @@ begin
     a = plot()
     for (k,σ) in zip(freqs,eachcol(σs))
         if k < 1.0
-            plot!(a, σ.*k, label="")
+            plot!(a, σ*k^2, label="")
         else
-            plot!(a, σ./k, label="")   
+            plot!(a, σ./k^2, label="")   
         end     
     end
     a
 end
+
+kkplot(σs./freqs', label="")  
