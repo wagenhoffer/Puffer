@@ -30,7 +30,7 @@ begin
         time_increment!(flow, foil, wake)
         # win = (minimum(foil.foil[1, :]') - foil.chord / 2.0, maximum(foil.foil[1, :]) + foil.chord * 2)
         win = nothing
-        f = plot_current(foil, wake; window = win)
+        f = plot(foil, wake)
         f
     end
     gif(movie, "./images/h_$(h0)_p_$(rad2deg(θ0)).gif", fps = 30)

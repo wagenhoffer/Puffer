@@ -8,11 +8,11 @@ begin
         motion = :make_heave_pitch,
         f = 0.25,
         motion_parameters = [0, deg2rad(5)],)
-    aoa = rotation(8 * pi / 180)'
-    foil._foil = (foil._foil' * aoa')'
-    wake = Wake(foil)
-    (foil)(flow)
-    movie = @animate for i in 1:(flow.N * 5)
+        aoa = rotation(8 * pi / 180)'
+        foil._foil = (foil._foil' * aoa')'
+        wake = Wake(foil)
+        (foil)(flow)
+        movie = @animate for i in 1:(flow.N * 5)
         # begin
         A, rhs, edge_body = make_infs(foil)
         setσ!(foil, flow)

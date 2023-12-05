@@ -9,10 +9,12 @@ function create_foils(num_foils, starting_positions)
 
     pos1 = deepcopy(defaultDict)
     pos1[:kine] = :make_heave_pitch
-    pos1[:motion_parameters] = [0.1, 0.0]
+    θ0 = deg2rad(5)
+    h0 = 0.05
+    pos1[:motion_parameters] = [h0, θ0]    
     foil1, flow = init_params(; pos1...)
 
-    foils = Vector{typeof(foil1)}(undef, 4)
+    foils = Vector{typeof(foil1)}(undef, num_foils)
     for i in 1:num_foils
         foil = deepcopy(foil1)
         foil.foil[1, :] .+= starting_positions[1, i] * foil1.chord
@@ -31,37 +33,114 @@ end
 
 
 begin
-    num_foils = 4
-    starting_positions = [2.0 1.0 1.0 0.0; 0.0 1.0 -1.0 0.0]
+    num_foils = 2
+    # starting_positions = [2.0 1.0 1.0 0.0; 0.0 1.0 -1.0 0.0]
+    starting_positions = [0.0 0.0 ; 100.0 -100.0 ]
     foils, flow = create_foils(num_foils, starting_positions)
     wake = Wake(foils)
     (foils)(flow)
-end
-
-for (i, foil) in enumerate(foils)
-   @show foil.edge[:, end]
-end
-
-
-begin 
     steps = flow.N * flow.Ncycles
     totalN = sum(foil.N for foil in foils)
+    kuttas = zeros(num_foils, steps)
     old_mus = zeros(3, totalN)
     old_phis = zeros(3, totalN)
     coeffs = zeros(length(foils), 4, steps)
     coeffs[:,:,1] = time_increment!(flow, foils, wake, old_mus, old_phis)
+    kuttas[:, 1] .= [foil.μ_edge[1] for foil in foils]
     movie = @animate for t in 2:steps
         coeffs[:,:,t] = time_increment!(flow, foils, wake, old_mus, old_phis)        
-        f1TEx = foils[1].foil[1, end] .+ (-0.25, 0.25)
-        f1TEy = foils[1].foil[2, end] .+ (-0.25, 0.25)
-        plot(foils, wake;xlims=f1TEx, ylims= f1TEy)        
+        f1TEx = foils[1].foil[1, end] .+ (-1.25, 1.25)
+        f1TEy = foils[1].foil[2, end] .+ (-0.5, 0.5)
+        plot(foils, wake;xlims=f1TEx, ylims=f1TEy)        
+        kuttas[:, t] .= [foil.μ_edge[1] for foil in foils]
         # plot!(foils[1].edge[1,:],foils[1].edge[2,:], color = :green, lw = 2,label="")
     end
     gif(movie, "newMulti.gif", fps = 30)
 end
 
+begin
+    ##now do the same with one swimmer and track its kutta mu
+    heave_pitch = deepcopy(defaultDict)
+
+    heave_pitch[:f] = 1.0
+    heave_pitch[:Uinf] = 1
+    heave_pitch[:kine] = :make_heave_pitch
+    θ0 = deg2rad(5)
+    h0 = 0.05
+    heave_pitch[:motion_parameters] = [h0, θ0]
+    foil, flow = init_params(; heave_pitch...)
+    wake = Wake(foil)
+    (foil)(flow)
+    kutta = zeros(flow.Ncycles * flow.N)
+    for i in 1:(flow.Ncycles * flow.N)
+        time_increment!(flow, foil, wake)
+        kutta[i] = foil.μ_edge[1]
+
+    end
+end
+plot(vcat(kuttas,kutta')')
 
 
+begin
+    ##lets run the time_increment per time-step and look at what gets constructed for buff and sigma
+    num_foils = 2
+    # starting_positions = [2.0 1.0 1.0 0.0; 0.0 1.0 -1.0 0.0]
+    starting_positions = [0.0 0.0 ; 100.0 -100.0 ]
+    foils, flow = create_foils(num_foils, starting_positions)
+    wake = Wake(foils)
+    (foils)(flow)
+    steps = flow.N * flow.Ncycles
+    totalN = sum(foil.N for foil in foils)
+    kuttas = zeros(num_foils, steps)
+    old_mus = zeros(3, totalN)
+    old_phis = zeros(3, totalN)
+    coeffs = zeros(length(foils), 4, steps)
+    coeffs[:,:,1] = time_increment!(flow, foils, wake, old_mus, old_phis)
+    heave_pitch = deepcopy(defaultDict)
+
+    heave_pitch[:f] = 1.0
+    heave_pitch[:Uinf] = 1
+    heave_pitch[:kine] = :make_heave_pitch
+    θ0 = deg2rad(5)
+    h0 = 0.05
+    heave_pitch[:motion_parameters] = [h0, θ0]
+    sfoil, sflow = init_params(; heave_pitch...)
+    swake = Wake(sfoil)
+    (sfoil)(sflow)    
+end
+begin
+    time_increment!(flow, foils, wake, old_mus, old_phis)
+    time_increment!(sflow, sfoil, swake)
+    ### CODE CHUNK FOR multi
+    A, rhs, edge_body = make_infs(foils)
+    [setσ!(foil, flow) for foil in foils]
+    
+    σs = zeros(totalN)
+    buff = zeros(totalN)
+    for (i, foil) in enumerate(foils)
+        foil.wake_ind_vel = vortex_to_target(wake.xy, foil.col, wake.Γ, flow)
+        normal_wake_ind = sum(foil.wake_ind_vel .* foil.normals, dims = 1)'
+        foil.σs -= normal_wake_ind[:]
+        σs[((i - 1) * foil.N + 1):(i * foil.N)] = foil.σs
+        buff[((i - 1) * foil.N + 1):(i * foil.N)] = (edge_body[:, i] * foil.μ_edge[1])
+    end
+    μs = A \ (-rhs * σs - buff)
+    ### CODE CHUNK FOR single
+    sA, srhs, sedge_body = make_infs(sfoil)
+
+    setσ!(sfoil, sflow)
+    sfoil.wake_ind_vel = vortex_to_target(swake.xy, sfoil.col, swake.Γ, sflow)
+    normal_wake_ind = sum(sfoil.wake_ind_vel .* sfoil.normals, dims = 1)'
+    sfoil.σs -= normal_wake_ind[:]
+    sbuff = sedge_body * sfoil.μ_edge[1]
+    sμs = sA \ (-srhs * sfoil.σs- sbuff)[:]
+    @show norm(μs - [sμs' sμs']', 2)
+    plot(μs)
+    plot!([sμs' sμs']')    
+
+    plot(sfoil.σs)
+    plot!(foils[1].σs) #<--- this is the problem
+end
 begin
     # do it with gory detal
     steps = flow.N * flow.Ncycles
@@ -112,7 +191,7 @@ begin
         for foil in foils
             release_vortex!(wake, foil)
         end
-        do_kinematics!(foils, flow)
+        (foils)(flow)
        
         f
     end
@@ -166,98 +245,3 @@ function time_increment!(flow::FlowParams, foils::Vector{Foil}, wake::Wake)
     do_kinematics!(foils, flow)
     nothing
 end
-
-######## STARTING TO IMPLEMENT A FENCE ######## 
-# Modify move_wake! to have a flag for fence ->flowParams
-using RegionTrees
-begin
-    dest = wake.xy + wake.uv .* flow.Δt
-    dir = dest .- wake.xy
-end
-vortices = vcat(wake.xy, dest)
-plot(wake.xy[1, :], wake.xy[2, :], st = :scatter, color = :blue, ms = 2)
-plot!(dest[1, :], dest[2, :], st = :scatter, color = :red, ms = 1)
-
-# We need to construct a RegionTrees to encapsulate the flow field. 
-xmin = minimum([wake.xy[1, :] dest[1, :]])
-xmax = maximum([wake.xy[1, :] dest[1, :]])
-ymin = minimum([wake.xy[2, :] dest[2, :]])
-ymax = maximum([wake.xy[2, :] dest[2, :]])
-xcom = (xmax + xmin) / 2.0
-ycom = (ymax + ymin) / 2.0
-width = xmax - xmin
-height = ymax - ymin
-panels = zeros(2, length(foils) * (foils[1].N + 1))
-for (i, f) in enumerate(foils)
-    panels[:, ((i - 1) * f.N + 1):(i * f.N)] = f.foil
-end
-root = Cell(SVector(xmin, ymin), SVector(width, height), vortices)
-
-import RegionTrees: AbstractRefinery, needs_refinement, refine_data
-using IntervalSets
-
-struct MyRefinery <: AbstractRefinery
-    tolerance::Float64
-end
-
-# These two methods are all we need to implement
-function needs_refinement(r::MyRefinery, cell)
-    maximum(cell.boundary.widths) > r.tolerance
-end
-function refine_data(r::MyRefinery, cell::Cell, indices)
-    # boundary = child_boundary(cell, indices)
-    # "child with widths: $(boundary.widths)"
-    curr = child_boundary(root, indices)
-    intervals = [ClosedInterval(curr.origin[i], curr.origin[i] + curr.widths[i])
-                 for i in 1:2]
-    hcat([vortices[:, i] for i in 1:size(vortices)[2] if
-              vortices[1, i] in intervals[1] && vortices[2, i] in intervals[2]]...)
-end
-r = MyRefinery(maximum(abs.(dir)) * 40.0)
-
-adaptivesampling!(root, r)
-
-count = 0
-for leaf in allleaves(root)
-    @show leaf.data |> size
-    count += 1
-end
-count
-
-panels[:, 1]
-node = findleaf(root, panels[:, 1])
-
-plt = plot(xlim = (xmin, xmax), ylim = (ymin, ymax), legend = nothing)
-for leaf in allleaves(root)
-    v = hcat(collect(vertices(leaf.boundary))...)
-    @show getindex(leaf)
-    plot!(plt, v[1, [1, 2, 4, 3, 1]], v[2, [1, 2, 4, 3, 1]])
-end
-plt
-
-function plot_ind(plt, index)
-    v = hcat(collect(vertices(getindex(root, [index])[1].boundary))...)
-    plot!(plt, v[1, [1, 2, 4, 3, 1]], v[2, [1, 2, 4, 3, 1]], color = :red, lw = 5)
-    plt
-end
-
-function get_cell(index)
-    indices = []
-    while index != 0
-        q, r = index ÷ 4, index % 4
-        push!(indices, [q, r])
-        index = (index - 1) ÷ 4
-    end
-    indices
-end
-
-curr = child_boundary(root, 1)
-intervals = [ClosedInterval(curr.origin[i], curr.origin[i] + curr.widths[i]) for i in 1:2]
-hcat([vortices[:, i] for i in 1:size(vortices)[2] if
-          vortices[1, i] in intervals[1] && vortices[2, i] in intervals[2]]...)
-for i in 1:size(vortices)[2]
-    all(vortices[j, :] in intervals for j in 1:2)
-end
-filter(pos -> pos[1] in intervals[1] && pos[2] in intervals[2], vortices[1:2, :])
-v_f = hcat([vortices[:, i] for i in 1:size(vortices)[2] if
-                vortices[1, i] in intervals[1] && vortices[2, i] in intervals[2]]...)

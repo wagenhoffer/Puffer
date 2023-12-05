@@ -177,6 +177,8 @@ function solve_n_update!(flow::FlowParams, foil::Foil, wake::Wake)
 end
 
 function time_increment!(flow::FlowParams{T}, foils::Vector{Foil{T}}, wake::Wake{T}, old_mus::Matrix{T}, old_phis::Matrix{T}) where T<:Real
+    totalN = sum(foil.N for foil in foils)
+    
     if flow.n != 1
         move_wake!(wake, flow)
         for foil in foils
@@ -187,14 +189,14 @@ function time_increment!(flow::FlowParams{T}, foils::Vector{Foil{T}}, wake::Wake
     A, rhs, edge_body = make_infs(foils)
     [setσ!(foil, flow) for foil in foils]
     
-    σs = []
-    buff = []
+    σs = zeros(totalN)
+    buff = zeros(totalN)
     for (i, foil) in enumerate(foils)
         foil.wake_ind_vel = vortex_to_target(wake.xy, foil.col, wake.Γ, flow)
         normal_wake_ind = sum(foil.wake_ind_vel .* foil.normals, dims = 1)'
         foil.σs -= normal_wake_ind[:]
-        push!(σs, foil.σs...)
-        push!(buff, (edge_body[:, i] * foil.μ_edge[1])...)
+        σs[((i - 1) * foil.N + 1):(i * foil.N)] = foil.σs
+        buff[((i - 1) * foil.N + 1):(i * foil.N)] = (edge_body[:, i] * foil.μ_edge[1])
     end
     μs = A \ (-rhs * σs - buff)
     for (i, foil) in enumerate(foils)
@@ -202,14 +204,14 @@ function time_increment!(flow::FlowParams{T}, foils::Vector{Foil{T}}, wake::Wake
     end
     set_edge_strength!.(foils)
     cancel_buffer_Γ!(wake, foils)
+    map(foil->body_to_wake!(wake, foil, flow), foils)
     wake_self_vel!(wake, flow)
-    totalN = sum(foil.N for foil in foils)
+    
     phis = zeros(totalN)
     ps = zeros(totalN)
 
     perf = zeros(length(foils), 4)
-    for (i, foil) in enumerate(foils)
-        body_to_wake!(wake, foil, flow)
+    for (i, foil) in enumerate(foils)        
         phi = get_phi(foil, wake)
         phis[((i - 1) * foils[i].N + 1):(i * foils[i].N)] = phi
         p = panel_pressure(foil,
