@@ -1,73 +1,69 @@
 using Puffer
 using Plots
 
-begin
+function create_foils(num_foils, starting_positions)
+    # Ensure starting_positions has correct dimensions
+    if size(starting_positions) != (2, num_foils)
+        error("starting_positions must be a 2xN array, where N is the number of foils")
+    end
+
     pos1 = deepcopy(defaultDict)
     pos1[:kine] = :make_heave_pitch
-    pos1[:motion_parameters] = [0.0, -π / 20]
+    pos1[:motion_parameters] = [0.1, 0.0]
     foil1, flow = init_params(; pos1...)
-    # copy the first foil
-    foil2 = deepcopy(foil1)
-    foil3 = deepcopy(foil1)
-    foil4 = deepcopy(foil1)
-    #alter the second foil - absolute position
-    foil2.foil[1, :] .+= 2.0 * foil1.chord
-    foil2.LE = [minimum(foil2.foil[1, :]), 0.0]
-    norms!(foil2)
-    set_collocation!(foil2)
-    move_edge!(foil2, flow)
-    foil2.edge[1, end] = 2.0 * foil2.edge[1, 2] - foil2.edge[1, 1]
 
-    foil3.foil[1, :] .+= 1.0 * foil1.chord
-    foil3.foil[2, :] .+= 1.0
-    foil3.LE = [minimum(foil3.foil[1, :]), foil3.foil[2, (foil3.N ÷ 2 + 1)]]
-    norms!(foil3)
-    set_collocation!(foil3)
-    move_edge!(foil3, flow)
-    foil3.edge[1, end] = 2.0 * foil3.edge[1, 2] - foil3.edge[1, 1]
-
-    foil4.foil[1, :] .+= 1.0 * foil1.chord
-    foil4.foil[2, :] .-= 1.0
-    foil4.LE = [minimum(foil4.foil[1, :]), foil4.foil[2, (foil4.N ÷ 2 + 1)]]
-    norms!(foil4)
-    set_collocation!(foil4)
-    move_edge!(foil4, flow)
-    foil4.edge[1, end] = 2.0 * foil4.edge[1, 2] - foil4.edge[1, 1]
-
-    #vector of foils
-    foils = [foil1, foil2, foil3, foil4]
-    @show typeof(foils)
-
-    flow.Ncycles = 5
-    flow.N = 50
-    flow.Uinf = 2.0
-
-    #wake init
-    N = length(foils)
-    xy = zeros(2, N)
-    Γs = zeros(N)
-    uv = zeros(2, N)
-    for (i, foil) in enumerate(foils)
-        xy[:, i] = foil.edge[:, end]
+    foils = Vector{typeof(foil1)}(undef, 4)
+    for i in 1:num_foils
+        foil = deepcopy(foil1)
+        foil.foil[1, :] .+= starting_positions[1, i] * foil1.chord
+        foil.foil[2, :] .+= starting_positions[2, i]
+        foil.LE = [minimum(foil.foil[1, :]), foil.foil[2, (foil.N ÷ 2 + 1)]]
+        norms!(foil)
+        set_collocation!(foil)
+        move_edge!(foil, flow;startup=true)
+        foil.edge[1, end] = 2.0 * foil.edge[1, 2] - foil.edge[1, 1]
+        foils[i] =  foil
     end
-    wake = Wake(foils)
-    do_kinematics!(foils, flow)
+
+    foils, flow
 end
 
-function cancel_buffer_Γ!(wake::Wake, foils::Vector{Foil{T}}) where {T <: Real}
-    for (i, foil) in enumerate(foils)
-        wake.xy[:, i] = foil.edge[:, 2]
-        wake.Γ[i] = -foil.μ_edge[end]
-    end
-end
 
-plt = plot()
-for f in foils
-    plot!(plt, f.foil[1, :], f.foil[2, :])
-end
-plt
 
 begin
+    num_foils = 4
+    starting_positions = [2.0 1.0 1.0 0.0; 0.0 1.0 -1.0 0.0]
+    foils, flow = create_foils(num_foils, starting_positions)
+    wake = Wake(foils)
+    (foils)(flow)
+end
+
+for (i, foil) in enumerate(foils)
+   @show foil.edge[:, end]
+end
+
+
+begin 
+    steps = flow.N * flow.Ncycles
+    totalN = sum(foil.N for foil in foils)
+    old_mus = zeros(3, totalN)
+    old_phis = zeros(3, totalN)
+    coeffs = zeros(length(foils), 4, steps)
+    coeffs[:,:,1] = time_increment!(flow, foils, wake, old_mus, old_phis)
+    movie = @animate for t in 2:steps
+        coeffs[:,:,t] = time_increment!(flow, foils, wake, old_mus, old_phis)        
+        f1TEx = foils[1].foil[1, end] .+ (-0.25, 0.25)
+        f1TEy = foils[1].foil[2, end] .+ (-0.25, 0.25)
+        plot(foils, wake;xlims=f1TEx, ylims= f1TEy)        
+        # plot!(foils[1].edge[1,:],foils[1].edge[2,:], color = :green, lw = 2,label="")
+    end
+    gif(movie, "newMulti.gif", fps = 30)
+end
+
+
+
+begin
+    # do it with gory detal
     steps = flow.N * flow.Ncycles
 
     movie = @animate for t in 1:steps
@@ -109,8 +105,9 @@ begin
         end
         old_mus = [μs'; old_mus[1:2, :]]
         old_phis = [phis'; old_phis[1:2, :]]
-        wake.xy = sdf_fence(wake, foils, flow; mask = [0, 1, 0, 0] .|> Bool)
-        f = plot_current(foils, wake;)
+        f = plot(foils, wake)
+        # wake.xy = sdf_fence(wake, foils, flow; mask = [0, 1, 0, 0] .|> Bool)
+       
         # move_wake!(wake, flow)
         for foil in foils
             release_vortex!(wake, foil)

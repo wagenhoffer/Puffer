@@ -189,7 +189,7 @@ function norms!(foil::Foil)
     nothing
 end
 
-function move_edge!(foil::Foil, flow::FlowParams)
+function move_edge!(foil::Foil, flow::FlowParams; startup = false)
     edge_vec = [
         (foil.tangents[1, end] - foil.tangents[1, 1]),
         (foil.tangents[2, end] - foil.tangents[2, 1]),
@@ -198,8 +198,9 @@ function move_edge!(foil::Foil, flow::FlowParams)
     edge_vec .*= flow.Uinf * flow.Δt
     #The edge starts at the TE -> advects some scale down -> the last midpoint
     foil.edge = [foil.foil[:, end] (foil.foil[:, end] .+ 0.4 * edge_vec) foil.edge[:, 2]]
-    #static buffer is a bugger
-    # foil.edge = [foil.foil[:, end] (foil.foil[:, end] .+ 0.4 * edge_vec) (foil.foil[:, end] .+ 1.4 * edge_vec)]
+    if startup
+        foil.edge = [foil.foil[:, end] (foil.foil[:, end] .+ 0.4 * edge_vec) (foil.foil[:, end] .+ 1.4 * edge_vec)]
+    end
     nothing
 end
 
@@ -238,35 +239,7 @@ function move_foil!(foil::Foil, pos)
     flow.n += 1
 end
 
-function do_kinematics!(foils::Vector{Foil{T}}, flow::FlowParams) where {T <: Real}
-    for foil in foils
-        #perform kinematics
-        if typeof(foil.kine) == Vector{Function}
-            le = foil.foil[1, foil.N ÷ 2 + 1]
-            h = foil.kine[1](foil.f, flow.n * flow.Δt)
-            θ = foil.kine[2](foil.f, flow.n * flow.Δt, -π / 2)
-            rotate_about!(foil, θ)
 
-            #Advance the foil in flow
-            # foil.foil[1,:] .+= le
-            foil.foil .+= foil.LE
-            foil.foil[2, :] .+= h
-            foil.foil .+= [-flow.Uinf, 0] .* flow.Δt
-            foil.LE = foil.foil[:, foil.N ÷ 2 + 1]
-
-        else
-            foil.foil[2, :] = foil._foil[2, :] .+
-                              foil.kine.(foil._foil[1, :], foil.f, foil.k, flow.n * flow.Δt)
-            #Advance the foil in flow
-            foil.foil .+= [-flow.Uinf, 0] .* flow.Δt
-        end
-        norms!(foil)
-        set_collocation!(foil)
-        move_edge!(foil, flow)
-    end
-    flow.n += 1
-    nothing
-end
 
 function rotate_about!(foil, θ; pivot = foil.pivot)
     foil.foil = ([foil._foil[1, :] .- foil.pivot foil._foil[2, :]] * rotation(θ))'

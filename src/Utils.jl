@@ -25,12 +25,25 @@ defaultDict = Dict(:T => Float64,
 
 
 @recipe function f(foil::Foil)
+    aspect_ratio := true
     (foil.col[1, :], foil.col[2, :])
+end
+
+@recipe function f(foils::Vector{Foil{T}}) where {T}
+    aspect_ratio := true
+    for foil in foils
+        @series begin
+            seriestype := :path
+            label := ""
+            (foil.col[1, :], foil.col[2, :])
+        end        
+    end
 end
 
 @recipe function f(foil::Foil, wake::Wake)
     # max_val = maximum(abs, wake.Γ)
     max_val = std(wake.Γ) / 2.0
+    aspect_ratio := true
     @series begin
         seriestype := :path
         label := ""
@@ -49,7 +62,7 @@ end
 end
 
 @recipe function f(foils::Vector{Foil{T}}, wake::Wake) where {T}        
-
+    aspect_ratio := true
     for foil in foils
         @series begin
             seriestype := :path
