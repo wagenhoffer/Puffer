@@ -25,9 +25,9 @@ begin
     end
     #We only care if the vortex ends up inside of the foil after motion
     nfoil = next_foil_pos(foil, flow)
-    a = plot_current(foil, wake)
+    a = plot(foil, wake)
     wake.xy .-= [2, 0.0]
-    a = plot_current(foil, wake)
+    a = plot(foil, wake)
 end
 
 begin
@@ -37,7 +37,7 @@ begin
         dest = sdf_fence(wake, foil, flow)
         wake.xy = dest
         time_increment!(flow, foil, wake)
-        a = plot_current(foil, wake)
+        a = plot(foil, wake)
         a
     end
     gif(movie, "fence.gif")

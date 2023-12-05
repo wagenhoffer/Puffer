@@ -23,58 +23,64 @@ defaultDict = Dict(:T => Float64,
     :pivot => 0.0,
     :thick => 0.12)
 
-function plot_current(foil::Foil, wake::Wake; window = nothing)
-    if !isnothing(window)
-        xs = (window[1], window[2])
-    else
-        xs = :auto
-    end
-    max_val = maximum(abs, wake.Γ)
-    max_val = std(wake.Γ) / 2.0
 
-    a = plot(foil.foil[1, :], foil.foil[2, :], aspect_ratio = :equal, label = "")
-    plot!(a, foil.edge[1, :], foil.edge[2, :], label = "")
-    plot!(a,
-        wake.xy[1, :],
-        wake.xy[2, :],
-        # markersize=wake.Γ .* 10, st=:scatter, label="",
-        markersize = 3,
-        st = :scatter,
-        label = "",
-        msw = 0,
-        xlims = xs,
-        marker_z = -wake.Γ, #/mean(abs.(wake.Γ)),
-        color = cgrad(:coolwarm),
-        clim = (-max_val, max_val))
-    a
+@recipe function f(foil::Foil)
+    aspect_ratio := true
+    (foil.col[1, :], foil.col[2, :])
 end
-function plot_current(foils::Vector{Foil{T}},
-    wake::Wake;
-    window = nothing) where {T <: Real}
-    if !isnothing(window)
-        xs = (window[1], window[2])
-    else
-        xs = :auto
-    end
-    max_val = maximum(abs, wake.Γ)
-    max_val = std(wake.Γ) / 2.0
-    a = plot()
+
+@recipe function f(foils::Vector{Foil{T}}) where {T}
+    aspect_ratio := true
     for foil in foils
-        plot!(a, foil.foil[1, :], foil.foil[2, :], aspect_ratio = :equal, label = "")
-        plot!(a, foil.edge[1, :], foil.edge[2, :], label = "")
+        @series begin
+            seriestype := :path
+            label := ""
+            (foil.col[1, :], foil.col[2, :])
+        end        
     end
-    plot!(a,
-        wake.xy[1, :],
-        wake.xy[2, :],
-        markersize = 3,
-        st = :scatter,
-        label = "",
-        msw = 0,
-        xlims = xs,
-        marker_z = -wake.Γ, #/mean(abs.(wake.Γ)),
-        color = cgrad(:coolwarm),
-        clim = (-max_val, max_val))
-    a
+end
+
+@recipe function f(foil::Foil, wake::Wake)
+    # max_val = maximum(abs, wake.Γ)
+    max_val = std(wake.Γ) / 2.0
+    aspect_ratio := true
+    @series begin
+        seriestype := :path
+        label := ""
+        (foil.col[1, :], foil.col[2, :])
+    end
+    @series begin 
+        seriestype := :scatter
+        markersize := 3
+        msw := 0
+        marker_z := -wake.Γ
+        color := cgrad(:coolwarm)
+        clim := (-max_val, max_val)
+        label := ""
+        (wake.xy[1, :], wake.xy[2, :])
+    end
+end
+
+@recipe function f(foils::Vector{Foil{T}}, wake::Wake) where {T}        
+    aspect_ratio := true
+    for foil in foils
+        @series begin
+            seriestype := :path
+            label := ""
+            (foil.col[1, :], foil.col[2, :])
+        end
+    end
+    max_val = std(wake.Γ) / 2.0
+    @series begin 
+        seriestype := :scatter
+        markersize := 3
+        msw := 0
+        marker_z := -wake.Γ
+        color := cgrad(:coolwarm)
+        clim := (-max_val, max_val)
+        label := ""
+        (wake.xy[1, :], wake.xy[2, :])
+    end
 end
 
 function plot_with_normals(foil::Foil)
@@ -207,13 +213,3 @@ function spalarts_prune!(wake::Wake, flow::FlowParams, foil::Foil; keep = 0)
     wake.uv = wake.uv[:, keepers]
     nothing
 end
-
-
-@recipe function f(::Foil{T}, foil::Foil{T}) where {T}  
-    # x = foil.col[1, :]
-    y = foil.col[2, :]
-    # aspect_ratio --> true
-    seriestype := :path
-    (y,x)
-end
-

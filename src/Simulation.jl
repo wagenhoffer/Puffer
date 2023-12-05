@@ -6,6 +6,7 @@
 Advance the foil in flow by one time step. This is the core of the simulation.
 """
 (foil::Foil)(flow::FlowParams) = _propel(foil, flow)
+(foils::Vector{Foil{T}})(flow::FlowParams) where {T <: Real} = _propel(foils, flow)
 
 """
     _propel(foil::Foil,
@@ -27,7 +28,7 @@ function _propel(foil::Foil,
     U = [0.0, 0.0],
     mass = 0.1,
     turnto = nothing,
-    self_prop = false,)
+    self_prop = false)
     #only effects the position of the LE with the forces defining the new velocity of self-propellsion
     #perform kinematics    
 
@@ -39,7 +40,7 @@ function _propel(foil::Foil,
     end
 
     if self_prop
-        #force, lift,-> thrust<-, power; only thrust
+        #force, lift,-> thrust<-, power ; but use [thrust, lift] for 2d data
         accel = -forces[3:-1:2] / mass
         U1 = U + accel * flow.Δt
         Δxy = 0.5 * (U + U1) * flow.Δt
@@ -60,18 +61,24 @@ function _propel(foil::Foil,
         foil.foil .+= hframe
     else
         foil.foil = ([foil._foil[1, :] .- foil.pivot foil._foil[2, :] .+
-                                                     foil.kine.(foil._foil[1, :],
-            foil.f,
-            foil.k,
-            flow.n * flow.Δt)] * rotation(-foil.θ))'
+                                        foil.kine.(foil._foil[1, :],foil.f,foil.k,flow.n * flow.Δt)]
+                                         * rotation(-foil.θ))'
     end
     foil.foil .+= foil.LE
     norms!(foil)
     set_collocation!(foil)
     move_edge!(foil, flow)
     flow.n += 1
-    U1
-    
+    U1    
+end
+
+function _propel(foils::Vector{Foil{T}}, flow::FlowParams) where {T <: Real}
+    for foil in foils
+        _propel(foil, flow)
+        flow.n -=1
+    end
+    flow.n += 1    
+    nothing
 end
 
 """
@@ -169,9 +176,17 @@ function solve_n_update!(flow::FlowParams, foil::Foil, wake::Wake)
     nothing
 end
 
-function time_increment!(flow::FlowParams, foils::Vector{Foil}, wake::Wake)
+function time_increment!(flow::FlowParams{T}, foils::Vector{Foil{T}}, wake::Wake{T}, old_mus::Matrix{T}, old_phis::Matrix{T}) where T<:Real
+    if flow.n != 1
+        move_wake!(wake, flow)
+        for foil in foils
+            release_vortex!(wake, foil)
+        end
+    end
+    (foils)(flow)
     A, rhs, edge_body = make_infs(foils)
     [setσ!(foil, flow) for foil in foils]
+    
     σs = []
     buff = []
     for (i, foil) in enumerate(foils)
@@ -191,9 +206,8 @@ function time_increment!(flow::FlowParams, foils::Vector{Foil}, wake::Wake)
     totalN = sum(foil.N for foil in foils)
     phis = zeros(totalN)
     ps = zeros(totalN)
-    old_mus = zeros(3, totalN)
-    old_phis = zeros(3, totalN)
-    coeffs = zeros(length(foils), 4, steps)
+
+    perf = zeros(length(foils), 4)
     for (i, foil) in enumerate(foils)
         body_to_wake!(wake, foil, flow)
         phi = get_phi(foil, wake)
@@ -204,17 +218,11 @@ function time_increment!(flow::FlowParams, foils::Vector{Foil}, wake::Wake)
             old_phis[:, ((i - 1) * foils[i].N + 1):(i * foils[i].N)],
             phi)
         ps[((i - 1) * foils[i].N + 1):(i * foils[i].N)] = p
-        coeffs[i, :, 1] .= get_performance(foil, flow, p)
+        perf[i, :] .= get_performance(foil, flow, p)
     end
-    old_mus = [μs'; old_mus[1:2, :]]# prob = LinearProblem(A, (-rhs*foil.σs-buff)[:])
+    old_mus = [μs'; old_mus[1:2, :]]
     old_phis = [phis'; old_phis[1:2, :]]
-
-    move_wake!(wake, flow)
-    for foil in foils
-        release_vortex!(wake, foil)
-    end
-    do_kinematics!(foils, flow)
-    nothing
+    perf
 end
 
 function get_phi(foil::Foil, wake::Wake)
