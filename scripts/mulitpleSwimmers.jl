@@ -110,15 +110,13 @@ begin
         old_mus = [μs'; old_mus[1:2, :]]
         old_phis = [phis'; old_phis[1:2, :]]
         wake.xy = sdf_fence(wake, foils, flow; mask = [0, 1, 0, 0] .|> Bool)
-
+        f = plot_current(foils, wake;)
         # move_wake!(wake, flow)
         for foil in foils
             release_vortex!(wake, foil)
         end
         do_kinematics!(foils, flow)
-        f = plot_current(foils, wake;)
-        # f = plot_current(foils, wake)
-        # @show t
+       
         f
     end
     gif(movie, "multi.gif", fps = 30)
