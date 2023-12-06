@@ -196,7 +196,7 @@ function time_increment!(flow::FlowParams{T}, foils::Vector{Foil{T}}, wake::Wake
         normal_wake_ind = sum(foil.wake_ind_vel .* foil.normals, dims = 1)'
         foil.σs -= normal_wake_ind[:]
         σs[((i - 1) * foil.N + 1):(i * foil.N)] = foil.σs
-        buff[((i - 1) * foil.N + 1):(i * foil.N)] = (edge_body[:, i] * foil.μ_edge[1])
+        buff += (edge_body[:, i] * foil.μ_edge[1])
     end
     μs = A \ (-rhs * σs - buff)
     for (i, foil) in enumerate(foils)
@@ -204,7 +204,7 @@ function time_increment!(flow::FlowParams{T}, foils::Vector{Foil{T}}, wake::Wake
     end
     set_edge_strength!.(foils)
     cancel_buffer_Γ!(wake, foils)
-    map(foil->body_to_wake!(wake, foil, flow), foils)
+    [body_to_wake!(wake, foil, flow) for foil in foils]
     wake_self_vel!(wake, flow)
     
     phis = zeros(totalN)
