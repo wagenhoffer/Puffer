@@ -109,35 +109,31 @@ end
 
 function make_infs(foils::Vector{Foil{T}}; ϵ = 1e-10) where {T <: Real}
     nfoils = length(foils)
-    Ns = [foil.N for foil in foils]
+    Ns = [foil.N for foil in foils]    
     N = sum(Ns)
     Ns = [0 cumsum(Ns)...]
+
+    allcols = hcat([f.col for f in foils]...)
+
     doubletMat = zeros(N, N)
     sourceMat = zeros(N, N)
     edgeMat = zeros(N, N)
-    #assumes all foils are same size
-    buffers = zeros(nfoils, foils[1].N)
-    #for pushing
-    # buffers = []
-    for i in 1:nfoils
-        for j in 1:nfoils
-            x1, x2, y = panel_frame(foils[i].col, foils[j].foil)
-            # ymask = abs.(y) .> ϵ
-            # y = y .* ymask
-            doubletMat[(Ns[i] + 1):Ns[i + 1], (Ns[j] + 1):Ns[j + 1]] = doublet_inf.(x1,
-                x2,
-                y)
-            sourceMat[(Ns[i] + 1):Ns[i + 1], (Ns[j] + 1):Ns[j + 1]] = source_inf.(x1, x2, y)
-            if i == j
-                nn = foils[i].N
-                x1, x2, y = panel_frame(foils[i].col, foils[i].edge)
-                edgeInf = doublet_inf.(x1, x2, y)
-                buffers[i, :] = edgeInf[:, 2]
-                # push!(buffers, edgeInf[:, 2])
-                edgeMat[(Ns[i] + 1):Ns[i + 1], Ns[i] + 1] = -edgeInf[:, 1]
-                edgeMat[(Ns[i] + 1):Ns[i + 1], Ns[i + 1]] = edgeInf[:, 1]
-            end
-        end
+
+    buffers = zeros(nfoils, N)
+    
+
+    for j = 1:nfoils
+        x1, x2, y = panel_frame(allcols, foils[j].foil)
+        ymask = abs.(y) .> ϵ
+        y = y .* ymask
+        doubletMat[:, (Ns[j] + 1):Ns[j + 1]] = doublet_inf.(x1, x2,y)
+        sourceMat[:, (Ns[j] + 1):Ns[j + 1]]  = source_inf.(x1, x2, y)
+        
+        x1, x2, y = panel_frame(allcols, foils[j].edge)
+        edgeInf = doublet_inf.(x1, x2, y)
+        buffers[j, :] = edgeInf[:, 2]    
+        edgeMat[:, Ns[j] + 1] = -edgeInf[:, 1]
+        edgeMat[:, Ns[j + 1]] = edgeInf[:, 1]    
     end
     A = doubletMat + edgeMat
     doubletMat + edgeMat, sourceMat, buffers'

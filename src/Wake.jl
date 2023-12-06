@@ -1,12 +1,3 @@
-#  Wake struct and related functions
-#  Wake
-#  show
-#  move_wake!
-#  body_to_wake!
-#  vortex_to_target
-#  release_vortex!
-#  set_edge_strength!
-#  cancel_buffer_Γ!
 
 mutable struct Wake{T}
     xy::Matrix{T}

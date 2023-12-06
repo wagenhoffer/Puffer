@@ -1,5 +1,6 @@
 using Puffer
 using Plots
+using LinearAlgebra
 
 function create_foils(num_foils, starting_positions)
     # Ensure starting_positions has correct dimensions
@@ -85,17 +86,11 @@ begin
     ##lets run the time_increment per time-step and look at what gets constructed for buff and sigma
     num_foils = 2
     # starting_positions = [2.0 1.0 1.0 0.0; 0.0 1.0 -1.0 0.0]
-    starting_positions = [0.0 0.0 ; 100.0 -100.0 ]
+    starting_positions = [0.0 0.0 ; 0.0 1000.0 ]
     foils, flow = create_foils(num_foils, starting_positions)
     wake = Wake(foils)
     (foils)(flow)
-    steps = flow.N * flow.Ncycles
-    totalN = sum(foil.N for foil in foils)
-    kuttas = zeros(num_foils, steps)
-    old_mus = zeros(3, totalN)
-    old_phis = zeros(3, totalN)
-    coeffs = zeros(length(foils), 4, steps)
-    coeffs[:,:,1] = time_increment!(flow, foils, wake, old_mus, old_phis)
+
     heave_pitch = deepcopy(defaultDict)
 
     heave_pitch[:f] = 1.0
@@ -120,9 +115,9 @@ begin
     for (i, foil) in enumerate(foils)
         foil.wake_ind_vel = vortex_to_target(wake.xy, foil.col, wake.Γ, flow)
         normal_wake_ind = sum(foil.wake_ind_vel .* foil.normals, dims = 1)'
-        foil.σs -= normal_wake_ind[:]
+        # foil.σs -= normal_wake_ind[:]
         σs[((i - 1) * foil.N + 1):(i * foil.N)] = foil.σs
-        buff[((i - 1) * foil.N + 1):(i * foil.N)] = (edge_body[:, i] * foil.μ_edge[1])
+        buff += (edge_body[:, i] * foil.μ_edge[1])
     end
     μs = A \ (-rhs * σs - buff)
     ### CODE CHUNK FOR single
@@ -131,15 +126,27 @@ begin
     setσ!(sfoil, sflow)
     sfoil.wake_ind_vel = vortex_to_target(swake.xy, sfoil.col, swake.Γ, sflow)
     normal_wake_ind = sum(sfoil.wake_ind_vel .* sfoil.normals, dims = 1)'
-    sfoil.σs -= normal_wake_ind[:]
+    # sfoil.σs -= normal_wake_ind[:]
     sbuff = sedge_body * sfoil.μ_edge[1]
     sμs = sA \ (-srhs * sfoil.σs- sbuff)[:]
-    @show norm(μs - [sμs' sμs']', 2)
-    plot(μs)
-    plot!([sμs' sμs']')    
+    @show norm(μs - [sμs' sμs']', 2)/norm(μs,2)
+    plot(μs,marker=:circle,lw=0)
+    plot!([sμs' sμs']', marker=:dtri,lw=0)    
 
-    plot(sfoil.σs)
-    plot!(foils[1].σs) #<--- this is the problem
+    # plot(sfoil.σs)
+    # plot!(foils[1].σs) #<--- this is the problem
+end
+begin
+    #show a comparisons between the single and multi body representations
+    @show sum(rhs[1:64,1:64] - srhs), sum(rhs[65:end,65:end] - srhs)
+    @show sum(σs[1:64] - sfoil.σs) , sum(σs[65:end] - sfoil.σs)
+    @show μs[end] - μs[65] - (sμs[end] - sμs[1])
+    @show sum(sfoil.col - foils[1].col)
+    @show sum(sfoil.edge - foils[1].edge)
+    @show sfoil.μ_edge[1] - foils[1].μ_edge[1]
+    @show wake.Γ[1] - swake.Γ[1]
+    @show sum(wake.xy[:,1:2:end] - swake.xy)
+    nothing 
 end
 begin
     # do it with gory detal

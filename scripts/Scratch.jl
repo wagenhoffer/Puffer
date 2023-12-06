@@ -26,15 +26,17 @@ begin
         time_increment!(flow, foil, wake)
         # Nice steady window for plotting
         win = (minimum(foil.foil[1, :]') - foil.chord / 2.0,
-            maximum(foil.foil[1, :]) + foil.chord * 2)
-        #ZOom in on the edge
-        # win = (minimum(foil.foil[1, :]') + 3*foil.chord / 4.0, maximum(foil.foil[1, :]) + foil.chord * 0.1)
-        if i % flow.N == 0
-            spalarts_prune!(wake, flow, foil; keep = flow.N ÷ 2)
-        end
-        win = nothing
-        f = plot_current(foil, wake; window = win)
-        f
+            maximum(foil.foil[1, :]nfoils = length(foils)
+            Ns = [foil.N for foil in foils]
+            N = sum(Ns)
+            Ns = [0 cumsum(Ns)...]
+            doubletMat = zeros(N, N)
+            sourceMat = zeros(N, N)
+            edgeMat = zeros(N, N)
+            
+            buffers = zeros(nfoils, foils[1].N)
+            
+            allcols = [foil.col for foil in foils ]
     end
     gif(movie, "./images/handp.gif", fps = 10)Review
 end
@@ -56,7 +58,17 @@ begin
     h0 = 0.01
     moored[:motion_parameters] = [h0, θ0]
     foil, flow = init_params(; moored...)
-    wake = Wake(foil)
+    wake = Wake(foil)nfoils = length(foils)
+    Ns = [foil.N for foil in foils]
+    N = sum(Ns)
+    Ns = [0 cumsum(Ns)...]
+    doubletMat = zeros(N, N)
+    sourceMat = zeros(N, N)
+    edgeMat = zeros(N, N)
+    
+    buffers = zeros(nfoils, foils[1].N)
+    
+    allcols = [foil.col for foil in foils ]
     (foil)(flow)
     ### EXAMPLE OF AN ANIMATION LOOP
     movie = @animate for i in 1:(flow.Ncycles * flow.N)
@@ -197,18 +209,17 @@ let
 
     avg_vals = cycle_averaged(coeffs, flow, 2)
     @test size(avg_vals) == (4, 8)
-
-    avg_vals = cycle_averaged(coeffs, flow, 0, 2)
-    @test size(avg_vals) == (4, 20)
-end
-
-begin
-    #look at the panel pressure for a foil
-    a = plot()
-    pressures = @animate for i in 10:(flow.N * flow.Ncycles)
-        plot(a, foil.col[1, :], ps[:, i] / (0.5 * flow.Uinf^2), label = "", ylims = (-2, 5))
-    end
-    gif(pressures, "../images/pressures.gif", fps = 30)
+    nfoils = length(foils)
+    Ns = [foil.N for foil in foils]
+    N = sum(Ns)
+    Ns = [0 cumsum(Ns)...]
+    doubletMat = zeros(N, N)
+    sourceMat = zeros(N, N)
+    edgeMat = zeros(N, N)
+    
+    buffers = zeros(nfoils, foils[1].N)
+    
+    allcols = [foil.col for foil in foils ]s/pressures.gif", fps = 30)
 end
 begin
     # plot a few snap shot at opposite ends of the motion
@@ -303,17 +314,17 @@ function spalarts_prune!(wake::Wake, flow::FlowParams, foil::Foil; keep = 0)
             if mask[k, j]
                 # only aggregate vortices generated during consistent motion
                 if sign(wake.Γ[k]) == sign(wake.Γ[j])
-                    wake.xy[:, j] = (abs(wake.Γ[j]) .* wake.xy[:, j] +
-                                     abs(wake.Γ[k]) .* wake.xy[:, k]) ./
-                                    (abs(wake.Γ[j] + wake.Γ[k]))
-                    wake.Γ[j] += wake.Γ[k]
-                    wake.xy[:, k] = [0.0, 0.0]
-                    wake.Γ[k] = 0.0
-                    mask[k, :] .= 0
-                else
-                    k += 1
-                end
-            end
+                    wake.xnfoils = length(foils)
+                    Ns = [foil.N for foil in foils]
+                    N = sum(Ns)
+                    Ns = [0 cumsum(Ns)...]
+                    doubletMat = zeros(N, N)
+                    sourceMat = zeros(N, N)
+                    edgeMat = zeros(N, N)
+                    
+                    buffers = zeros(nfoils, foils[1].N)
+                    
+                    allcols = [foil.col for foil in foils ]
             j += 1
         end
         k += 1
@@ -593,3 +604,32 @@ begin
     a
 end
 turn = pi / 7
+
+"""
+
+nfoils = length(foils)
+Ns = [foil.N for foil in foils]
+N = sum(Ns)
+Ns = [0 cumsum(Ns)...]
+doubletMat = zeros(N, N)
+sourceMat = zeros(N, N)
+edgeMat = zeros(N, N)
+
+buffers = zeros(nfoils, N)
+
+
+allpanels = hcat([f.foil for f in foils]...)
+alledges = hcat([f.edge for f in foils]...)
+x1, x2, y = panel_frame(allcols, allpanels)
+ymask = abs.(y) .> ϵ
+y = y .* ymask
+doublet_inf.(x1, x2,y)
+source_inf.(x1, x2, y)
+
+x1, x2, y = panel_frame(allcols, alledges)
+edgeInf = doublet_inf.(x1, x2, y)
+
+x1, x2, y = panel_frame(allcols, foils[1].edge)
+edgeInf = doublet_inf.(x1, x2, y)
+
+

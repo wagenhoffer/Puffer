@@ -161,29 +161,12 @@ function time_increment!(flow::FlowParams, foil::Foil, wake::Wake)
     nothing
 end
 
-function solve_n_update!(flow::FlowParams, foil::Foil, wake::Wake)
-    A, rhs, edge_body = make_infs(foil)
-    setσ!(foil, flow)
-    foil.wake_ind_vel = vortex_to_target(wake.xy, foil.col, wake.Γ, flow)
-    normal_wake_ind = sum(foil.wake_ind_vel .* foil.normals, dims = 1)'
-    foil.σs -= normal_wake_ind[:]
-    buff = edge_body * foil.μ_edge[1]
-    foil.μs = A \ (-rhs * foil.σs - buff)[:]
-    set_edge_strength!(foil)
-    cancel_buffer_Γ!(wake, foil)
-    body_to_wake!(wake, foil, flow)
-    wake_self_vel!(wake, flow)
-    nothing
-end
-
 function time_increment!(flow::FlowParams{T}, foils::Vector{Foil{T}}, wake::Wake{T}, old_mus::Matrix{T}, old_phis::Matrix{T}) where T<:Real
     totalN = sum(foil.N for foil in foils)
     
     if flow.n != 1
         move_wake!(wake, flow)
-        for foil in foils
-            release_vortex!(wake, foil)
-        end
+        [release_vortex!(wake, foil) for foil in foils]        
     end
     (foils)(flow)
     A, rhs, edge_body = make_infs(foils)
