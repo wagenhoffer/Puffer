@@ -138,7 +138,7 @@ function young4()
     foil, flow, wake, coeffs = run_sim(; young...)
     k = π * foil.f / flow.Uinf
     @show rad2deg(θ0), k
-    plot_current(foil, wake)
+    plot(foil, wake)
     plot_coeffs(coeffs ./ (0.5 * flow.Uinf^2), flow)
 end
 
