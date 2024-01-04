@@ -2,7 +2,7 @@ using Puffer
 using Plots
 using LinearAlgebra
 
-function create_foils(num_foils, starting_positions)
+function create_foils(num_foils, starting_positions, phases )
     # Ensure starting_positions has correct dimensions
     # if size(starting_positions) != (2, num_foils)
     #     error("starting_positions must be a 2xN array, where N is the number of foils")
@@ -10,6 +10,7 @@ function create_foils(num_foils, starting_positions)
 
     pos1 = deepcopy(defaultDict)
     pos1[:kine] = :make_heave_pitch
+    pos1[:ψ]  = phases[1]
     θ0 = deg2rad(5)
     h0 = 0.05
     pos1[:motion_parameters] = [h0, θ0]    
@@ -18,6 +19,7 @@ function create_foils(num_foils, starting_positions)
     foils = Vector{typeof(foil1)}(undef, num_foils)
     for i in 1:num_foils
         foil = deepcopy(foil1)
+        foil.ψ = phases[i]
         foil.foil[1, :] .+= starting_positions[1, i] * foil1.chord
         foil.foil[2, :] .+= starting_positions[2, i]
         foil.LE = [minimum(foil.foil[1, :]), foil.foil[2, (foil.N ÷ 2 + 1)]]
@@ -34,10 +36,11 @@ end
 
 
 begin
-    num_foils = 1
+    num_foils = 2
     # starting_positions = [2.0 1.0 1.0 0.0; 0.0 1.0 -1.0 0.0]
-    starting_positions = [0.0 0.0 ; 100.0 -100.0 ]
-    foils, flow = create_foils(num_foils, starting_positions)
+    starting_positions = [0.0 0.0 ; 0.0 -0.25 ]
+    phases = [pi/2 3pi/2]
+    foils, flow = create_foils(num_foils, starting_positions, phases)
     wake = Wake(foils)
     (foils)(flow)
     steps = flow.N * flow.Ncycles
@@ -52,7 +55,7 @@ begin
         coeffs[:,:,t] = time_increment!(flow, foils, wake, old_mus, old_phis)        
         f1TEx = foils[1].foil[1, end] .+ (-0.25, 0.25)
         f1TEy = foils[1].foil[2, end] .+ (-0.25, 0.25)
-        plot(foils, wake; xlims=f1TEx, ylims=f1TEy)        
+        plot(foils, wake) #; xlims=f1TEx, ylims=f1TEy)        
         kuttas[:, t] .= [foil.μ_edge[1] for foil in foils]
         # plot!(foils[1].edge[1,:],foils[1].edge[2,:], color = :green, lw = 2,label="")
     end

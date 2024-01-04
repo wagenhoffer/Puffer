@@ -29,7 +29,7 @@ function init_params(; kwargs...)
     Uinf = kwargs[:Uinf]
     ρ = kwargs[:ρ]
     Nt = kwargs[:Nt]
-    f = kwargs[:f]
+    f = kwargs[:f]    
     Δt = 1 / Nt / f
     nt = 0
     δ = Uinf * Δt * 1.3
@@ -45,6 +45,7 @@ function init_params(; kwargs...)
     foil = Foil{T}(kine,
         T(f),
         T(kwargs[:k]),
+        T(kwargs[:ψ]),
         N,
         foil,
         copy(foil),

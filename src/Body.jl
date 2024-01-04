@@ -5,6 +5,7 @@ mutable struct Foil{T} <: Body
     kine::Any  #kinematics: heave or traveling wave function
     f::T #wave freq
     k::T # wave number
+    ψ::T # phase
     N::Int # number of elements
     _foil::Matrix{T} # coordinates in the Body Frame
     foil::Matrix{T}  # Absolute fram
@@ -216,7 +217,7 @@ function next_foil_pos(foil::Foil, flow::FlowParams)
     #perform kinematics
     if typeof(foil.kine) == Vector{Function}
         h = foil.kine[1](foil.f, flow.n * flow.Δt)
-        θ = foil.kine[2](foil.f, flow.n * flow.Δt, -π / 2)
+        θ = foil.kine[2](foil.f, flow.n * flow.Δt, foil.ψ)
         pos = rotate_about(foil, θ)
         pos[2, :] .+= h
         #Advance the foil in flow

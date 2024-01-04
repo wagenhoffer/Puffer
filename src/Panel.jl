@@ -20,7 +20,7 @@ function get_panel_vels(foil::Foil, fp::FlowParams)
     col = get_mdpts(foil._foil)
 
     if typeof(foil.kine) == Vector{Function}
-        theta(t) = foil.kine[2](foil.f, t, -π / 2)
+        theta(t) = foil.kine[2](foil.f, t, foil.ψ)
         heave(t) = foil.kine[1](foil.f, t)
         dx(t) = col[1, :] * cos(theta(t)) - col[2, :] * sin(theta(t))
         dy(t) = col[1, :] * sin(theta(t)) + col[2, :] * cos(theta(t)) .+ heave(t)
@@ -40,7 +40,7 @@ function get_panel_vels!(foil::Foil, fp::FlowParams)
     col = get_mdpts(foil._foil)
     #TODO switch to a s-exp label dispatch
     if typeof(foil.kine) == Vector{Function}
-        theta(t) = foil.kine[2](foil.f, t, -π / 2)
+        theta(t) = foil.kine[2](foil.f, t, foil.ψ)
         heave(t) = foil.kine[1](foil.f, t)
         dx(t) = col[1, :] * cos(theta(t)) - col[2, :] * sin(theta(t))
         dy(t) = col[1, :] * sin(theta(t)) + col[2, :] * cos(theta(t)) .+ heave(t)

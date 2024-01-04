@@ -55,7 +55,7 @@ function _propel(foil::Foil,
 
     if typeof(foil.kine) == Vector{Function}
         h = foil.kine[1](foil.f, flow.n * flow.Δt)
-        θ = foil.kine[2](foil.f, flow.n * flow.Δt, -π / 2)
+        θ = foil.kine[2](foil.f, flow.n * flow.Δt, foil.ψ)
         rotate_about!(foil, θ + foil.θ)
         hframe = rotation(foil.θ) * [0 h]'
         foil.foil .+= hframe

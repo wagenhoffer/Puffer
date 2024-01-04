@@ -9,7 +9,7 @@ heave_pitch[:Nt] = 64
 heave_pitch[:Ncycles] = 2
 heave_pitch[:f] = 1.0
 heave_pitch[:Uinf] = 1
-heave_pitch[:kine] = :make_ang
+heave_pitch[:kine] = :make_heave_pitch
 θ0 = deg2rad(5)
 h0 = 0.0
 heave_pitch[:motion_parameters] = [h0, θ0]
@@ -25,18 +25,7 @@ begin
     movie = @animate for i in 1:(flow.Ncycles * flow.N)
         time_increment!(flow, foil, wake)
         # Nice steady window for plotting
-        win = (minimum(foil.foil[1, :]') - foil.chord / 2.0,
-            maximum(foil.foil[1, :]nfoils = length(foils)
-            Ns = [foil.N for foil in foils]
-            N = sum(Ns)
-            Ns = [0 cumsum(Ns)...]
-            doubletMat = zeros(N, N)
-            sourceMat = zeros(N, N)
-            edgeMat = zeros(N, N)
-            
-            buffers = zeros(nfoils, foils[1].N)
-            
-            allcols = [foil.col for foil in foils ]
+        plot(foil, wake)            
     end
     gif(movie, "./images/handp.gif", fps = 10)Review
 end
@@ -58,17 +47,6 @@ begin
     h0 = 0.01
     moored[:motion_parameters] = [h0, θ0]
     foil, flow = init_params(; moored...)
-    wake = Wake(foil)nfoils = length(foils)
-    Ns = [foil.N for foil in foils]
-    N = sum(Ns)
-    Ns = [0 cumsum(Ns)...]
-    doubletMat = zeros(N, N)
-    sourceMat = zeros(N, N)
-    edgeMat = zeros(N, N)
-    
-    buffers = zeros(nfoils, foils[1].N)
-    
-    allcols = [foil.col for foil in foils ]
     (foil)(flow)
     ### EXAMPLE OF AN ANIMATION LOOP
     movie = @animate for i in 1:(flow.Ncycles * flow.N)
@@ -82,8 +60,7 @@ begin
         #     spalarts_prune!(wake, flow, foil; keep=flow.N÷2)
         # end
         win = nothing
-        f = plot_current(foil, wake; window = win)
-        f
+        plot(foil, wake)        
     end
     gif(movie, "./images/theo.gif", fps = 10)
 end
@@ -120,7 +97,7 @@ begin
         #     spalarts_prune!(wake, flow, foil; keep=flow.N÷2)
         # end
         win = nothing
-        f = plot_current(foil, wake; window = win)
+        f = plot(foil, wake; window = win)
         f
     end
     gif(movie, "./images/theo.gif", fps = 10)
@@ -209,18 +186,9 @@ let
 
     avg_vals = cycle_averaged(coeffs, flow, 2)
     @test size(avg_vals) == (4, 8)
-    nfoils = length(foils)
-    Ns = [foil.N for foil in foils]
-    N = sum(Ns)
-    Ns = [0 cumsum(Ns)...]
-    doubletMat = zeros(N, N)
-    sourceMat = zeros(N, N)
-    edgeMat = zeros(N, N)
     
-    buffers = zeros(nfoils, foils[1].N)
-    
-    allcols = [foil.col for foil in foils ]s/pressures.gif", fps = 30)
 end
+
 begin
     # plot a few snap shot at opposite ends of the motion
     pos = 60
