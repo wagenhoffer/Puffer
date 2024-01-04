@@ -166,7 +166,8 @@ function time_increment!(flow::FlowParams{T}, foils::Vector{Foil{T}}, wake::Wake
     
     if flow.n != 1
         move_wake!(wake, flow)
-        [release_vortex!(wake, foil) for foil in foils]        
+        [release_vortex!(wake, foil) for foil in foils]    
+        cancel_buffer_Γ!(wake, foils)    
     end
     (foils)(flow)
     A, rhs, edge_body = make_infs(foils)
@@ -186,7 +187,7 @@ function time_increment!(flow::FlowParams{T}, foils::Vector{Foil{T}}, wake::Wake
         foil.μs = μs[((i - 1) * foil.N + 1):(i * foil.N)]
     end
     set_edge_strength!.(foils)
-    cancel_buffer_Γ!(wake, foils)
+    # cancel_buffer_Γ!(wake, foils)
     [body_to_wake!(wake, foil, flow) for foil in foils]
     wake_self_vel!(wake, flow)
     

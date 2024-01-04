@@ -4,9 +4,9 @@ using LinearAlgebra
 
 function create_foils(num_foils, starting_positions)
     # Ensure starting_positions has correct dimensions
-    if size(starting_positions) != (2, num_foils)
-        error("starting_positions must be a 2xN array, where N is the number of foils")
-    end
+    # if size(starting_positions) != (2, num_foils)
+    #     error("starting_positions must be a 2xN array, where N is the number of foils")
+    # end
 
     pos1 = deepcopy(defaultDict)
     pos1[:kine] = :make_heave_pitch
@@ -34,7 +34,7 @@ end
 
 
 begin
-    num_foils = 2
+    num_foils = 1
     # starting_positions = [2.0 1.0 1.0 0.0; 0.0 1.0 -1.0 0.0]
     starting_positions = [0.0 0.0 ; 100.0 -100.0 ]
     foils, flow = create_foils(num_foils, starting_positions)
@@ -50,9 +50,9 @@ begin
     kuttas[:, 1] .= [foil.μ_edge[1] for foil in foils]
     movie = @animate for t in 2:steps
         coeffs[:,:,t] = time_increment!(flow, foils, wake, old_mus, old_phis)        
-        f1TEx = foils[1].foil[1, end] .+ (-1.25, 1.25)
-        f1TEy = foils[1].foil[2, end] .+ (-0.5, 0.5)
-        plot(foils, wake;xlims=f1TEx, ylims=f1TEy)        
+        f1TEx = foils[1].foil[1, end] .+ (-0.25, 0.25)
+        f1TEy = foils[1].foil[2, end] .+ (-0.25, 0.25)
+        plot(foils, wake; xlims=f1TEx, ylims=f1TEy)        
         kuttas[:, t] .= [foil.μ_edge[1] for foil in foils]
         # plot!(foils[1].edge[1,:],foils[1].edge[2,:], color = :green, lw = 2,label="")
     end
