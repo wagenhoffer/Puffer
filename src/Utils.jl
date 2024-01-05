@@ -106,6 +106,14 @@ function plot_coeffs(coeffs, flow)
     p = plot(a, b, c, d, layout = (2, 2), legend = :topleft, size = (800, 800))
     p
 end
+function plot_coeffs_many(coeffs, flow)
+    ps = []
+    for i in 1:size(coeffs,1)
+        push!(ps, plot_coeffs(coeffs[i,:, :], flow))
+    end
+    plot(ps..., size = (800, 800))
+end
+
 
 """
     cycle_averaged(coeffs::Array{Real, 2}, flow::FlowParams, skip_cycles::Int64 = 0, sub_cycles::Int64 = 1)

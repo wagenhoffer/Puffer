@@ -140,7 +140,7 @@ minsmax(foil) = map(x -> minimum(nfoil[1,:]) <= x <= maximum(nfoil[2,:]), dest[1
     flow -> the flow parameters
     dest -> the destination of the vortices
 """
-function sdf_fence(wake::Wake, foil::Foil, flow::FlowParams; dest = nothing, max_iters = 10)
+function sdf_fence(wake::Wake, foil::Foil, flow::FlowParams; dest = nothing)
     # Estimate the final position of the vortices
     dest = isnothing(dest) ? wake.xy + wake.uv * flow.Δt : dest    
     # Calculate the next position of the foil
@@ -162,9 +162,11 @@ function sdf_fence(wake::Wake, foil::Foil, flow::FlowParams; dest = nothing, max
     inside = inside .&& xinside
     # Start the looping process, using a quadtree to reduce the computational load
     iters = 1
-    yint =0.0
-    while sum(inside) > 0 && iters < max_iters        
-        for i in findall(x -> x == 1, inside)
+
+    while sum(inside) > 0 && iters < 10        
+        deez = findall(x -> x == 1, inside)
+
+        for i in deez
             flip = 1  # Variable to flip the direction of the tangent vortex
             # Check if the vortex is on the top or bottom of the foil
             if dest[2, i] >= mid(wake.xy[1, i])
@@ -177,7 +179,12 @@ function sdf_fence(wake::Wake, foil::Foil, flow::FlowParams; dest = nothing, max
                     flip = -1
                 end
                 # Check if there is an intersection point between the vortex and the foil
-                yint, whichPanel = process_intersection(xint, top, dest, i, nfoil, N)
+                if !isempty(xint)
+                    yint = top(xint)
+                    whichPanel = findlast(xint .>= nfoil[1, N+1:end]) + N
+                else
+                    whichPanel = findlast(dest[1, i] .>= nfoil[1, N:end]) + N
+                end
             else
                 # Construct the spline path for the bottom of the foil
                 bPath = Spline1D(nfoil[1, N:-1:1], nfoil[2, N:-1:1] - ms[i] .* nfoil[1,  N:-1:1] .+ bs[i])
@@ -187,19 +194,26 @@ function sdf_fence(wake::Wake, foil::Foil, flow::FlowParams; dest = nothing, max
                     xint = filter(x -> wake.xy[1, i] >= x >= dest[1, i], roots(bPath))
                     flip = -1
                 end
-                yint, whichPanel = process_intersection(xint, top, dest, i, nfoil, N)
+                if !isempty(xint)
+                    yint = bottom(xint)
+                    whichPanel = findfirst(xint .>= nfoil[1, 1:N + 1]) - 1
+                else
+                    whichPanel = findfirst(dest[1, i] .>= nfoil[1, 1:N + 1]) - 1
+                end
             end
-            tangents = [-foil.tangents[:,1:foil.N÷2] foil.tangents[:,foil.N÷2+1:end]]
+            # Update the motion of the vortex based on the intersection with the foil
             if !isempty(xint)
-                leg1 = [xint..., yint...] .- wake.xy[:, i] .+ flow.δ .* foil.normals[:, whichPanel]
+                #make all tangents direct to TE
+                tangents = [-foil.tangents[:,1:foil.N÷2] foil.tangents[:,foil.N÷2+1:end]]
+                # leg1 = [xint..., yint...] .- wake.xy[:, i] .+ flow.δ .* foil.normals[:, whichPanel]
                 leg2 = dest[:, i] .- [xint..., yint...] .+ flow.δ .* foil.normals[:, whichPanel]
                 mag = norm(leg2) * flip
-                final_pos = [xint..., yint...] + mag .* tangents[:, whichPanel] .+ flow.δ .* foil.normals[:, whichPanel]
+                fin = [xint..., yint...] + mag .* tangents[:, whichPanel] .+ flow.δ .* foil.normals[:, whichPanel]
+            # If the vortex is outside the last foil but within the next time step, move it according to the local panel's motion
             elseif sdf(dest[:, i]) < 0.0
-                final_pos = dest[:, i] + nfoil[:, whichPanel] - foil.foil[:, whichPanel] .+ flow.δ .* foil.normals[:, whichPanel]
+                fin = dest[:, i] + nfoil[:, whichPanel] - foil.foil[:, whichPanel] .+ flow.δ .* foil.normals[:, whichPanel]
             end
-            
-            dest[:, i] = final_pos
+            dest[:, i] = fin
             
             xinside = map(x -> minimum(nfoil[1,:]) <= x <= maximum(nfoil[1,:]), dest[1,:])    
             inside = map(x-> sdf(dest[:,x]) < 0, axes(dest,2) )
@@ -211,7 +225,7 @@ function sdf_fence(wake::Wake, foil::Foil, flow::FlowParams; dest = nothing, max
     end
     @assert count(x-> x ==2, inside) == 0 
     dest    
-end 
+end
 
 function process_intersection(xint, path, dest, i, nfoil, N)
     if !isempty(xint)
