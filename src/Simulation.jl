@@ -161,11 +161,12 @@ function time_increment!(flow::FlowParams, foil::Foil, wake::Wake)
     nothing
 end
 
-function time_increment!(flow::FlowParams{T}, foils::Vector{Foil{T}}, wake::Wake{T}, old_mus::Matrix{T}, old_phis::Matrix{T}) where T<:Real
+function time_increment!(flow::FlowParams{T}, foils::Vector{Foil{T}}, wake::Wake{T}, old_mus::Matrix{T}, old_phis::Matrix{T};mask=nothing) where T<:Real
     totalN = sum(foil.N for foil in foils)
     
     if flow.n != 1
-        move_wake!(wake, flow)
+        move_wake!(wake, flow,foils;mask=mask)
+        
         [release_vortex!(wake, foil) for foil in foils]    
         cancel_buffer_Γ!(wake, foils)    
     end
@@ -186,8 +187,7 @@ function time_increment!(flow::FlowParams{T}, foils::Vector{Foil{T}}, wake::Wake
     for (i, foil) in enumerate(foils)
         foil.μs = μs[((i - 1) * foil.N + 1):(i * foil.N)]
     end
-    set_edge_strength!.(foils)
-    # cancel_buffer_Γ!(wake, foils)
+    set_edge_strength!.(foils)    
     [body_to_wake!(wake, foil, flow) for foil in foils]
     wake_self_vel!(wake, flow)
     

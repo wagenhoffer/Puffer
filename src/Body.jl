@@ -214,22 +214,24 @@ rotation(α) = [cos(α) -sin(α)
     sin(α) cos(α)]
 
 function next_foil_pos(foil::Foil, flow::FlowParams)
+    #TODO: rework for self propelled swimming
     #perform kinematics
+    Δxy = flow.Uinf .* flow.Δt
+    LE = foil.LE
+    xle1 = [cos(foil.θ + π), sin(foil.θ + π)] .* Δxy
+    LE += xle1[:]
     if typeof(foil.kine) == Vector{Function}
         h = foil.kine[1](foil.f, flow.n * flow.Δt)
         θ = foil.kine[2](foil.f, flow.n * flow.Δt, foil.ψ)
-        pos = rotate_about(foil, θ)
-        pos[2, :] .+= h
-        #Advance the foil in flow
-        pos .+= [-flow.Uinf, 0] .* flow.Δt .* flow.n
+        pos = rotate_about(foil, θ + foil.θ)
+        hframe = rotation(foil.θ) * [0 h]'
+        pos .+= hframe        
     else
-        pos = deepcopy(foil.foil)
-        pos[2, :] = foil._foil[2, :] .+
-                    foil.kine.(foil._foil[1, :], foil.f, foil.k, flow.n * flow.Δt)
-        #Advance the foil in flow
-        pos .+= [-flow.Uinf, 0] .* flow.Δt
+        ([foil._foil[1, :] .- foil.pivot foil._foil[2, :] .+
+        foil.kine.(foil._foil[1, :],foil.f,foil.k,flow.n * flow.Δt)]
+         * rotation(-foil.θ))'
     end
-    pos
+    pos .+= LE
 end
 
 function move_foil!(foil::Foil, pos)

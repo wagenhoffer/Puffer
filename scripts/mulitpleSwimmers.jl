@@ -2,25 +2,33 @@ using Puffer
 using Plots
 using LinearAlgebra
 
-function create_foils(num_foils, starting_positions, phases )
+function create_foils(num_foils, starting_positions, kine; kwargs...) 
     # Ensure starting_positions has correct dimensions
     # if size(starting_positions) != (2, num_foils)
     #     error("starting_positions must be a 2xN array, where N is the number of foils")
     # end
-
-    pos1 = deepcopy(defaultDict)
-    pos1[:kine] = :make_heave_pitch
-    pos1[:ψ]  = phases[1]
-    θ0 = deg2rad(5)
-    h0 = 0.05
-    pos1[:motion_parameters] = [h0, θ0]    
-    foil1, flow = init_params(; pos1...)
-
-    foils = Vector{typeof(foil1)}(undef, num_foils)
+    pos = deepcopy(defaultDict)       
+    pos[:kine] = kine
+    foils = Vector{Foil{pos[:T]}}(undef, num_foils)
+    flow = 0
     for i in 1:num_foils
-        foil = deepcopy(foil1)
-        foil.ψ = phases[i]
-        foil.foil[1, :] .+= starting_positions[1, i] * foil1.chord
+        @show i
+        for (k,v) in kwargs
+            if size(v,1) ==1
+                pos[k] = v
+            else
+                v = v[i,:]
+                if size(v,1) == 1
+                    pos[k] = v[1]
+                else
+                    pos[k] = v
+                end
+            end
+        end   
+        # @show pos     
+        foil, flow = init_params(; pos...)      
+        @show flow          
+        foil.foil[1, :] .+= starting_positions[1, i] * foil.chord
         foil.foil[2, :] .+= starting_positions[2, i]
         foil.LE = [minimum(foil.foil[1, :]), foil.foil[2, (foil.N ÷ 2 + 1)]]
         norms!(foil)
@@ -29,21 +37,24 @@ function create_foils(num_foils, starting_positions, phases )
         foil.edge[1, end] = 2.0 * foil.edge[1, 2] - foil.edge[1, 1]
         foils[i] =  foil
     end
-
+    @show flow
     foils, flow
 end
-
-
 
 begin
     num_foils = 2
     # starting_positions = [2.0 1.0 1.0 0.0; 0.0 1.0 -1.0 0.0]
-    starting_positions = [0.0 0.0 ; 0.0 -0.25 ]
-    phases = [pi/2 3pi/2]
-    foils, flow = create_foils(num_foils, starting_positions, phases)
+    starting_positions = [0.0 1.5 ; 0.0 0.0 ]
+    phases = [pi/2, -pi/2]
+    θ0 = deg2rad(10)
+    h0 = 0.0
+    motion_parameters = [h0 θ0 ; -h0 θ0]
+
+    foils, flow = create_foils(num_foils, starting_positions, :make_heave_pitch; motion_parameters=motion_parameters, ψ=phases, Ncycles = 3, Nt = 64);
     wake = Wake(foils)
+    @show [foil.f for foil in foils]
     (foils)(flow)
-    steps = flow.N * flow.Ncycles
+    steps = flow.N *flow.Ncycles
     totalN = sum(foil.N for foil in foils)
     kuttas = zeros(num_foils, steps)
     old_mus = zeros(3, totalN)
@@ -52,14 +63,24 @@ begin
     coeffs[:,:,1] = time_increment!(flow, foils, wake, old_mus, old_phis)
     kuttas[:, 1] .= [foil.μ_edge[1] for foil in foils]
     movie = @animate for t in 2:steps
-        coeffs[:,:,t] = time_increment!(flow, foils, wake, old_mus, old_phis)        
+        coeffs[:,:,t] = time_increment!(flow, foils, wake, old_mus, old_phis; mask=[true, true])        
         f1TEx = foils[1].foil[1, end] .+ (-0.25, 0.25)
         f1TEy = foils[1].foil[2, end] .+ (-0.25, 0.25)
+        
         plot(foils, wake) #; xlims=f1TEx, ylims=f1TEy)        
-        kuttas[:, t] .= [foil.μ_edge[1] for foil in foils]
+        # vel_track(foils)
         # plot!(foils[1].edge[1,:],foils[1].edge[2,:], color = :green, lw = 2,label="")
     end
     gif(movie, "newMulti.gif", fps = 30)
+end
+
+function vel_track(foils)
+    plot()
+    for (i,f) in enumerate(foils)
+        plot!(f.panel_vel[1,:],label="U_$(i)")
+        plot!(f.panel_vel[2,:],label="V_$(i)")
+    end
+    plot!()
 end
 
 begin

@@ -30,6 +30,15 @@ function Wake(foils::Vector{Foil{T}}) where {T <: Real}
     Wake{T}(xy, Γs, uv)
 end
 
+function move_wake!(wake, flow, foils; mask = nothing ) 
+    if isnothing(mask)
+       move_wake!(wake, flow)
+    else
+        wake.xy = sdf_fence(wake, foils, flow; mask = mask)    
+    end
+    nothing
+end
+
 function move_wake!(wake::Wake, flow::FlowParams)
     wake.xy += wake.uv .* flow.Δt
     nothing

@@ -233,7 +233,6 @@ function sdf_fence(wake::Wake, foils::Vector, flow::FlowParams; mask=nothing)
     dest =  wake.xy + wake.uv * flow.Δt    
     mask = isnothing(mask) ? ones(Bool, length(foils)) : mask
     for i in findall(mask)
-
         dest = sdf_fence(wake, foils[i], flow; dest=dest)              
     end
     dest
