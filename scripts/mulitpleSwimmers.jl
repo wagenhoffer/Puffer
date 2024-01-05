@@ -41,6 +41,8 @@ function create_foils(num_foils, starting_positions, kine; kwargs...)
     foils, flow
 end
 
+
+
 begin
     num_foils = 2
     # starting_positions = [2.0 1.0 1.0 0.0; 0.0 1.0 -1.0 0.0]
@@ -56,12 +58,13 @@ begin
     (foils)(flow)
     steps = flow.N *flow.Ncycles
     totalN = sum(foil.N for foil in foils)
-    kuttas = zeros(num_foils, steps)
+    kuttas = zeros(num_foils, 2, steps)
     old_mus = zeros(3, totalN)
     old_phis = zeros(3, totalN)
     coeffs = zeros(length(foils), 4, steps)
     coeffs[:,:,1] = time_increment!(flow, foils, wake, old_mus, old_phis)
-    kuttas[:, 1] .= [foil.μ_edge[1] for foil in foils]
+    kuttas[:,1, 1] .= [foil.panel_vel[1,32] for foil in foils]
+    kuttas[:,2, 1] .= [foil.panel_vel[2,32] for foil in foils]
     movie = @animate for t in 2:steps
         coeffs[:,:,t] = time_increment!(flow, foils, wake, old_mus, old_phis; mask=[true, true])        
         f1TEx = foils[1].foil[1, end] .+ (-0.25, 0.25)
