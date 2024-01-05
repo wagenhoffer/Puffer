@@ -11,6 +11,7 @@ function create_foils(num_foils, starting_positions, phases )
     pos1 = deepcopy(defaultDict)
     pos1[:kine] = :make_heave_pitch
     pos1[:ψ]  = phases[1]
+    pos1[:Ncycles] = 5
     θ0 = deg2rad(5)
     h0 = 0.05
     pos1[:motion_parameters] = [h0, θ0]    
@@ -18,7 +19,8 @@ function create_foils(num_foils, starting_positions, phases )
 
     foils = Vector{typeof(foil1)}(undef, num_foils)
     for i in 1:num_foils
-        foil = deepcopy(foil1)
+        pos1[:motion_parameters] = [h0*(-1)^i, θ0]
+        foil, _ = init_params(; pos1...)
         foil.ψ = phases[i]
         foil.foil[1, :] .+= starting_positions[1, i] * foil1.chord
         foil.foil[2, :] .+= starting_positions[2, i]
@@ -34,34 +36,58 @@ function create_foils(num_foils, starting_positions, phases )
 end
 
 
-
 begin
     num_foils = 2
     # starting_positions = [2.0 1.0 1.0 0.0; 0.0 1.0 -1.0 0.0]
-    starting_positions = [0.0 0.0 ; 0.0 -0.25 ]
-    phases = [pi/2 3pi/2]
+    δ = 0.2
+    starting_positions = [0.0 0.0 ; δ -δ ]
+    phases = [pi/2 -pi/2]
     foils, flow = create_foils(num_foils, starting_positions, phases)
     wake = Wake(foils)
     (foils)(flow)
     steps = flow.N * flow.Ncycles
     totalN = sum(foil.N for foil in foils)
-    kuttas = zeros(num_foils, steps)
+    kuttas = zeros(num_foils, 2, steps)
     old_mus = zeros(3, totalN)
     old_phis = zeros(3, totalN)
     coeffs = zeros(length(foils), 4, steps)
     coeffs[:,:,1] = time_increment!(flow, foils, wake, old_mus, old_phis)
-    kuttas[:, 1] .= [foil.μ_edge[1] for foil in foils]
+    kuttas[:,1, 1] .= [foil.panel_vel[1,32] for foil in foils]
+    kuttas[:,2, 1] .= [foil.panel_vel[2,32] for foil in foils]
     movie = @animate for t in 2:steps
         coeffs[:,:,t] = time_increment!(flow, foils, wake, old_mus, old_phis)        
         f1TEx = foils[1].foil[1, end] .+ (-0.25, 0.25)
         f1TEy = foils[1].foil[2, end] .+ (-0.25, 0.25)
         plot(foils, wake) #; xlims=f1TEx, ylims=f1TEy)        
-        kuttas[:, t] .= [foil.μ_edge[1] for foil in foils]
+        kuttas[:,1, t] .= [foil.panel_vel[1,32] for foil in foils]
+        kuttas[:,2, t] .= [foil.panel_vel[2,32] for foil in foils]
         # plot!(foils[1].edge[1,:],foils[1].edge[2,:], color = :green, lw = 2,label="")
     end
     gif(movie, "newMulti.gif", fps = 30)
 end
-
+begin
+    (foils)(flow)
+    plot()
+    for (i,foil) in enumerate(foils)
+        plot!(foil.foil[1,:],foil.foil[2,:]*(-1)^(i+1))
+    end
+    plot!()
+end
+begin
+    plot(kuttas[1,1,:])
+    p1 = plot!(-kuttas[2,1,:])
+    p2 = plot(kuttas[1,1,:]+ kuttas[2,1,:])
+    plot(p1,p2,layout=(1,2))
+end
+begin
+    u = plot()
+    v = plot()
+    for i=1:2
+        plot!(u, foils[i].panel_vel[1,:])
+        plot!(v, foils[i].panel_vel[2,:])
+    end
+    plot(u,v)
+end
 begin
     ##now do the same with one swimmer and track its kutta mu
     heave_pitch = deepcopy(defaultDict)
