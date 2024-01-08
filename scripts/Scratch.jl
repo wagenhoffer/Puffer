@@ -601,3 +601,61 @@ x1, x2, y = panel_frame(allcols, foils[1].edge)
 edgeInf = doublet_inf.(x1, x2, y)
 
 
+
+
+nothing
+"""
+
+
+
+V0 = 10e-4 * flow.Uinf
+D0 = 0.1 * foils[1].chord
+te = [foils[1].foil[1,1] 0.0]'
+
+
+mask = abs.(wake.Γ * wake.Γ') .* abs.(zs .- zs') ./
+       (abs.(wake.Γ .+ wake.Γ') .* (D0 .+ ds) .^ 1.5 .* (D0 .+ ds') .^ 1.5) .< V0
+
+k = 4
+num_vorts = length(wake.Γ)
+N = sum([f.N for f in foils])
+x = wake.xy[1, k:end]
+y = wake.xy[2, k:end]
+xy = [x y]'
+Γ  = wake.Γ[k:end]
+ds = sqrt.(sum(abs2, xy .- te, dims = 1))
+zs = sqrt.(sum(xy .^ 2, dims = 1))
+idx = sortperm(y )
+x = x[idx]
+y = y[idx]
+xy = [x y]'
+Γ  = Γ[idx]
+ds = ds[idx]
+zs = zs[idx]
+
+
+# to save the last half of a cycle of motion keep = flow.N ÷ 2    
+while k < num_vorts 
+    j = k + 1
+    while j < N + 1
+        if mask[k, j]
+            # only aggregate vortiy = wake.xy[2, 4:end]ces of similar rotation
+            if sign(Γ[k]) == sign(Γ[j])
+                xy[:, j] = (abs(Γ[j]) .* xy[:, j] +
+                                 abs(Γ[k]) .* xy[:, k]) ./
+                                (abs(Γ[j] + Γ[k]))
+                Γ[j] += Γ[k]
+                xy[:, k] = [0.0, 0.0]
+                Γ[k] = 0.0
+                mask[k, :] .= 0
+            else
+                k += 1
+            end
+        end
+        j += 1
+    end
+    k += 1
+end
+
+# clean up the wake struct
+keepers = findall(x -> x != 0.0, wake.Γ)
