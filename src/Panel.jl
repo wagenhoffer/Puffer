@@ -29,7 +29,7 @@ function get_panel_vels(foil::Foil, fp::FlowParams)
             ForwardDiff.derivative(t -> dy(t), _t),
         ]
     else
-        vy = ForwardDiff.derivative(t -> foil.kine.(col[1, :], foil.f, foil.k, t), _t)
+        vy = ForwardDiff.derivative(t -> foil.kine.(col[1, :], foil.f, foil.k, t, foil.ψ), _t)
         vels = [zeros(size(vy)) vy]
     end
     vels
@@ -48,7 +48,7 @@ function get_panel_vels!(foil::Foil, fp::FlowParams)
         foil.panel_vel[1, :] = ForwardDiff.derivative(t -> dx(t), _t)
         foil.panel_vel[2, :] = ForwardDiff.derivative(t -> dy(t), _t)
     else
-        vy = ForwardDiff.derivative(t -> foil.kine.(col[1, :], foil.f, foil.k, t), _t)
+        vy = ForwardDiff.derivative(t -> foil.kine.(col[1, :], foil.f, foil.k, t, foil.ψ), _t)
         foil.panel_vel = [zeros(size(vy)) vy]'
     end
     nothing
@@ -174,11 +174,12 @@ function setσ!(foil::Foil, flow::FlowParams; U_b = nothing)
 end
 
 function turn_σ!(foil::Foil, flow::FlowParams, turn)
+    #TODO: add for other kinematics
     ff = get_mdpts(([foil._foil[1, :] .- foil.pivot foil._foil[2, :] .+
                                                     foil.kine.(foil._foil[1, :],
         foil.f,
         foil.k,
-        flow.n * flow.Δt)] * rotation(-turn))') .+ foil.LE
+        flow.n * flow.Δt, foil.ψ)] * rotation(-turn))') .+ foil.LE
     vel = (foil.col - ff) ./ flow.Δt
     foil.σs += vel[1, :] .* foil.normals[1, :] + vel[2, :] .* foil.normals[2, :]
     nothing

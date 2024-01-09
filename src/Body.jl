@@ -133,7 +133,18 @@ function make_ang(a0 = 0.1; a = [0.367, 0.323, 0.310])
     k = 0.5
 
     amp(x, a) = a[1] + a[2] * x + a[3] * x^2
-    h(x, f, k, t) = a0 * amp(x, a) * sin(2π * (k * x - f * t))
+    h(x, f, k, t) = a0 * amp(x, a) * sin(2π * (k * x - f * t ))
+    h
+end
+
+function make_wave(a0 = 0.1; a = [0.367, 0.323, 0.310])
+    a0 = a0
+    a = a
+    f = π
+    k = 0.5
+
+    amp(x, a) = a[1] + a[2] * x + a[3] * x^2
+    h(x, f, k, t, ψ) = a0 * amp(x, a) * sin(2π * (k * x - f * t ) + ψ)
     h
 end
 
@@ -216,7 +227,7 @@ rotation(α) = [cos(α) -sin(α)
 function next_foil_pos(foil::Foil, flow::FlowParams)
     #TODO: rework for self propelled swimming
     #perform kinematics
-    Δxy = flow.Uinf .* flow.Δt
+    Δxy = flow.Uinf * flow.Δt
     LE = foil.LE
     xle1 = [cos(foil.θ + π), sin(foil.θ + π)] .* Δxy
     LE += xle1[:]
@@ -228,7 +239,7 @@ function next_foil_pos(foil::Foil, flow::FlowParams)
         pos .+= hframe        
     else
         pos = ([foil._foil[1, :] .- foil.pivot foil._foil[2, :] .+
-        foil.kine.(foil._foil[1, :],foil.f,foil.k,flow.n * flow.Δt)]
+        foil.kine.(foil._foil[1, :], foil.f,foil.k,flow.n * flow.Δt, foil.ψ)]
          * rotation(-foil.θ))'
     end
     pos .+= LE

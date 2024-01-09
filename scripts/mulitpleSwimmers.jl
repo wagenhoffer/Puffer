@@ -152,13 +152,13 @@ begin
     num_foils = 2
     # starting_positions = [2.0 1.0 1.0 0.0; 0.0 1.0 -1.0 0.0]
     starting_positions = [1.5 1.5;  0.15 -0.15 ]
-    phases = [pi/2, -pi/2]    
-    fs = [ -1.0, 1.0]
-    ks = [ 1.0, -1.0]
+    phases = [pi, 0.0]    
+    fs = [ 2.0, 2.0]
+    ks = [ 1.0, 1.0]
     a0 = 0.1
     motion_parameters = [a0 for i in 1:num_foils]
 
-    foils, flow = create_foils(num_foils, starting_positions, :make_ang;
+    foils, flow = create_foils(num_foils, starting_positions, :make_wave;
              motion_parameters=motion_parameters, ψ=phases, Ncycles = 5,
              k= ks,  Nt = 64, f = fs);
     wake = Wake(foils)
@@ -173,70 +173,18 @@ begin
     coeffs[:,:,1] = time_increment!(flow, foils, wake, old_mus, old_phis)
 
     movie = @animate for t in 2:steps
-        coeffs[:,:,t] = time_increment!(flow, foils, wake, old_mus, old_phis; mask=[false, false])    
-        xlims = foils[2].foil[1,1] .+ (-0.25, 0.25)
-        ylims = foils[2].foil[2,1] .+ (-0.5, 0.25)
+        coeffs[:,:,t] = time_increment!(flow, foils, wake, old_mus, old_phis; mask=[false, true])    
+        # xlims = foils[2].foil[1,1] .+ (-0.25, 0.25)
+        # ylims = foils[2].foil[2,1] .+ (-0.5, 0.25)
         #  if t%(flow.N÷2) == 0
         #     spalarts_prune!(wake, flow, foils; te =[foils[1].foil[1,1] 0.0]' )
         # end
+        # (foils)(flow)
         plot(foils, wake)#; xlims=xlims, ylims=ylims)
     end
     gif(movie, "newMulti.gif", fps = 30)
 end
 
-function vel_track(foils)
-    plot()
-    for (i,f) in enumerate(foils)
-        plot!(f.panel_vel[1,:],label="U_$(i)")
-        plot!(f.panel_vel[2,:],label="V_$(i)")
-    end
-    plot!()
-end
-
-begin
-    ##now do the same with one swimmer and track its kutta mu
-    heave_pitch = deepcopy(defaultDict)
-
-    heave_pitch[:f] = 1.0
-    heave_pitch[:Uinf] = 1
-    heave_pitch[:kine] = :make_heave_pitch
-    θ0 = deg2rad(5)
-    h0 = 0.05
-    heave_pitch[:motion_parameters] = [h0, θ0]
-    foil, flow = init_params(; heave_pitch...)
-    wake = Wake(foil)
-    (foil)(flow)
-    kutta = zeros(flow.Ncycles * flow.N)
-    for i in 1:(flow.Ncycles * flow.N)
-        time_increment!(flow, foil, wake)
-        kutta[i] = foil.μ_edge[1]
-
-    end
-end
-plot(vcat(kuttas,kutta')')
-
-
-begin
-    ##lets run the time_increment per time-step and look at what gets constructed for buff and sigma
-    num_foils = 2
-    # starting_positions = [2.0 1.0 1.0 0.0; 0.0 1.0 -1.0 0.0]
-    starting_positions = [0.0 0.0 ; 0.0 1000.0 ]
-    foils, flow = create_foils(num_foils, starting_positions)
-    wake = Wake(foils)
-    (foils)(flow)
-
-    heave_pitch = deepcopy(defaultDict)
-
-    heave_pitch[:f] = 1.0
-    heave_pitch[:Uinf] = 1
-    heave_pitch[:kine] = :make_heave_pitch
-    θ0 = deg2rad(5)
-    h0 = 0.05
-    heave_pitch[:motion_parameters] = [h0, θ0]
-    sfoil, sflow = init_params(; heave_pitch...)
-    swake = Wake(sfoil)
-    (sfoil)(sflow)    
-end
 
 
 

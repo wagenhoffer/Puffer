@@ -61,7 +61,7 @@ function _propel(foil::Foil,
         foil.foil .+= hframe
     else
         foil.foil = ([foil._foil[1, :] .- foil.pivot foil._foil[2, :] .+
-                                        foil.kine.(foil._foil[1, :],foil.f,foil.k,flow.n * flow.Δt)]
+                                        foil.kine.(foil._foil[1, :],foil.f,foil.k,flow.n * flow.Δt, foil.ψ)]
                                          * rotation(-foil.θ))'
     end
     foil.foil .+= foil.LE

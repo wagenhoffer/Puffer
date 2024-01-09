@@ -120,7 +120,7 @@ begin
     # Define parameter ranges
     T = Float32
     reduced_freq_values = LinRange{T}(0.25, 4, 5)
-    ks = LinRange{T}(0.35, 2.0, 5)
+    k_values = LinRange{T}(0.35, 2.0, 5)
     a0 = 0.1
     δs = LinRange{T}(3*a0, 13*a0, 5)./2.0
 
@@ -129,11 +129,12 @@ begin
     allofit = Vector{DataFrame}()
     allCoeffs = Vector{DataFrame}()
     # Nested loops to vary parameters
-
+    counter = 1
     for reduced_freq in reduced_freq_values
-        for k in ks
+        for k in k_values
             for δ in δs
-                @show reduced_freq, k, δ
+                @show counter, reduced_freq, k, δ
+                counter +=1
                 # Set motion parameters
                 starting_positions = [0.0  0.0 ; -δ δ ]
                 phases = [pi/2, pi/2,pi/2, pi/2]    
@@ -196,22 +197,104 @@ begin
                         append!(datas, values)
                     end
                 end
-                values = DataFrame(δ = [δ], reduced_freq = [reduced_freq], k = [k], coeffs = [coeffs])
-                if size(coeff_df,1) == 0
-                    coeff_df = values
-                else
-                    append!(coeff_df, values)
-                end
-                
-
+                coeff_df = DataFrame(δ = [δ], reduced_freq = [reduced_freq], k = [k], coeffs = [coeffs])
+                                
+                push!(allCoeffs, coeff_df)
                 push!(allofit, datas)
             end
         end
     end    
-    path = joinpath("data", "multipleSwimmers_data.jls")    
+    path = joinpath("data", "multipleSwimmers_images_data.jls")    
     allofit = vcat(allofit...)
     serialize(path, allofit)
-    path = joinpath("data", "multipleSwimmers_coeffs.jls")
+    path = joinpath("data", "multipleSwimmers_images_coeffs.jls")
+    allCoeffs = vcat(allCoeffs...)
+    serialize(path, allCoeffs)
+end
+
+
+
+begin
+    """
+    Redo the above for multiple inline swimmers
+    """
+    # Define parameter ranges
+    T = Float32
+    reduced_freq_values = LinRange{T}(0.25, 4, 5)
+    k_values = LinRange{T}(0.35, 2.0, 5)
+    a0 = 0.1
+    δs = LinRange{T}(1.25 ,2.0, 4)
+    ψs = LinRange{T}(0, pi, 5)
+
+    num_foils = 2
+
+    allofit = Vector{DataFrame}()
+    allCoeffs = Vector{DataFrame}()
+    # Nested loops to vary parameters
+    counter = 1
+    for reduced_freq in reduced_freq_values
+        for k in k_values
+            for δ in δs
+                for ψi in ψs
+                    @show counter, reduced_freq, k, δ
+                    counter +=1
+                    # Set motion parameters
+                    starting_positions = [0.0  δ; 0.0 0.0 ]
+                    phases = [0, ψi]    
+                    fs     = [ reduced_freq, reduced_freq]
+                    ks     = [ k, k]
+                    
+                    motion_parameters = [a0 for i in 1:num_foils]
+                
+                    foils, flow = create_foils(num_foils, starting_positions, :make_wave;
+                            motion_parameters=motion_parameters, ψ=phases, Ncycles = 5,
+                            k= ks,  Nt = 64, f = fs);
+                    
+                    wake = Wake(foils)
+                    
+
+                    # Perform simulations and save results
+                    totalN = sum(foil.N for foil in foils)
+                    steps = flow.N*flow.Ncycles
+                    
+                    old_mus, old_phis = zeros(3, totalN), zeros(3, totalN)
+                    coeffs = zeros(length(foils), 4, steps)
+                                        
+
+                    for i in 1:steps
+                        coeffs[:,:,1] = time_increment!(flow, foils, wake, old_mus, old_phis; mask=[false, true])
+                        values = DataFrame( δ = [δ],
+                                            reduced_freq = [reduced_freq],
+                                            k            = [k],
+                                            ψ            = [ψi],
+                                            U_inf        = [flow.Uinf],
+                                            t            = [flow.n * flow.Δt],
+                                            σs           = [vcat([foil.σs for foil in foils]...)],
+                                            panel_vel    = [vcat([foil.panel_vel for foil in foils]...)],
+                                            position     = [vcat([foil.col for foil in foils]...)],
+                                            normals      = [vcat([foil.normals for foil in foils]...)],
+                                            wake_ind_vel = [vcat([foil.wake_ind_vel for foil in foils]...)],
+                                            tangents     = [vcat([foil.tangents for foil in foils]...)],
+                                            μs           = [vcat([foil.μs for foil in foils]...)]
+                                            )        
+                        if i == 1
+                            datas = values
+                        else
+                            append!(datas, values)
+                        end
+                    end
+                    coeff_df = DataFrame(δ = [δ], reduced_freq = [reduced_freq], k = [k], coeffs = [coeffs])
+                                    
+                    push!(allCoeffs, coeff_df)
+                    push!(allofit, datas)
+                end
+            end
+        end
+    end    
+    path = joinpath("data", "multipleSwimmers_inline_data.jls")    
+    allofit = vcat(allofit...)
+    serialize(path, allofit)
+    path = joinpath("data", "multipleSwimmers_inline_coeffs.jls")
     allCoeffs = vcat(allCoeffs...)
     serialize(path, allCoeffs)
 end
