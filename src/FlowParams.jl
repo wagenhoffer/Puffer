@@ -30,7 +30,7 @@ function init_params(; kwargs...)
     ρ = kwargs[:ρ]
     Nt = kwargs[:Nt]
     f = kwargs[:f]    
-    Δt = 1 / Nt / f
+    Δt = abs(1 / Nt / f)
     nt = 0
     δ = Uinf * Δt * 1.3
     fp = FlowParams{T}(Δt, Uinf, ρ, Nt, kwargs[:Ncycles], nt, δ)
