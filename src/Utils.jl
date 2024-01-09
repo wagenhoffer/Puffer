@@ -24,6 +24,9 @@ defaultDict = Dict(:T => Float64,
     :pivot => 0.0,
     :thick => 0.12)
 
+"""
+Plotting Recipes
+"""
 
 @recipe function f(foil::Foil)
     aspect_ratio := true
@@ -221,4 +224,61 @@ function spalarts_prune!(wake::Wake, flow::FlowParams, foil::Foil; keep = 0)
     wake.xy = wake.xy[:, keepers]
     wake.uv = wake.uv[:, keepers]
     nothing
+end
+
+"""
+create_foils(num_foils, starting_positions, kine; kwargs...)
+
+Create multiple foils with specified starting positions and kinematics.
+
+# Arguments
+- `num_foils`: Number of foils to create.
+- `starting_positions`: Matrix of starting positions for each foil.
+- `kine`: Kinematics for the foils.
+- `kwargs`: Additional keyword arguments.
+
+# Returns
+- `foils`: Array of created foils.
+- `flow`: Flow value.
+
+# Example
+An example of usage can be found in multipleSwimmers.jl
+"""
+function create_foils(num_foils, starting_positions, kine; kwargs...) 
+    pos = deepcopy(defaultDict)       
+    pos[:kine] = kine
+    foils = Vector{Foil{pos[:T]}}(undef, num_foils)
+    flow = 0
+    for i in 1:num_foils
+        for (k,v) in kwargs
+            if size(v,1) == 1
+                pos[k] = v
+            else
+                v = v[i,:]
+                if size(v,1) == 1
+                    pos[k] = v[1]
+                else
+                    pos[k] = v
+                end
+            end
+        end   
+        # @show pos     
+        foil, flow = init_params(; pos...)              
+        foil.foil[1, :] .+= starting_positions[1, i] * foil.chord
+        foil.foil[2, :] .+= starting_positions[2, i]
+        foil.LE = [minimum(foil.foil[1, :]), foil.foil[2, (foil.N ÷ 2 + 1)]]
+        norms!(foil)
+        set_collocation!(foil)
+        move_edge!(foil, flow;startup=true)
+        foil.edge[1, end] = 2.0 * foil.edge[1, 2] - foil.edge[1, 1]
+        foils[i] =  foil
+    end
+    foils, flow
+end
+
+function school_of_four(height, width, chord)
+    # Define the coordinates of the swimmers in the rhombus 
+    xs = [0, width/2, width, width/2] .- chord/2.0
+    ys = [height/2, 0, height/2, height]
+    [xs ys]'
 end

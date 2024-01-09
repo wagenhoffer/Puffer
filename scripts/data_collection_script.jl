@@ -1,5 +1,7 @@
 using Puffer
-using Plots, DataFrames, Serialization
+using Plots
+using DataFrames
+using Serialization
 
 ang = deepcopy(defaultDict)
 ang[:N] = 64      #number of panels (elements) to discretize the foil
@@ -11,47 +13,6 @@ ang[:kine] = :make_ang
 ang[:T] = Float32 #kinematics generation function
 a0 = 0.1                #how much the leading edge heaves up and down wrt the chord(length) of the swimmer
 ang[:motion_parameters] = a0
-
-begin
-    """
-    This code snippet implements the above dictionary, ang, and runs a simulation based on the parameters
-    The main loop of the simulation can be seen in the for loop, though explicit matrix building is done in time_increment!
-
-    The code produces plots of the performance metrics for the given setup. 
-
-    THIS IS JUST TO VISUALIZE AND ENSURE YOU'RE BUILDING THE CORRECT SYTEMS!
-    """
-    foil, flow = init_params(; ang...)
-    k = foil.f * foil.chord / flow.Uinf
-    @show k
-    wake = Wake(foil)
-    (foil)(flow)
-    #data containers
-    old_mus, old_phis = zeros(3, foil.N), zeros(3, foil.N)
-    phi = zeros(foil.N)
-    coeffs = zeros(4, flow.Ncycles * flow.N)
-    ps = zeros(foil.N, flow.Ncycles * flow.N)
-    ### EXAMPLE OF AN PERFROMANCE METRICS LOOP
-    for i in 1:(flow.Ncycles * flow.N)
-        time_increment!(flow, foil, wake)
-        phi = get_phi(foil, wake)    # (output space) <-probably not that important                            
-        p = panel_pressure(foil, flow, old_mus, old_phis, phi)
-        # (output space) <- p is a function of μ and we should be able to recreate this     
-        old_mus = [foil.μs'; old_mus[1:2, :]]
-        old_phis = [phi'; old_phis[1:2, :]]
-        coeffs[:, i] = get_performance(foil, flow, p)
-        # the coefficients of PERFROMANCE are important, but are just a scaling of P
-        # if we can recreate p correctly, this will be easy to get also (not important at first)
-        ps[:, i] = p # storage container of the output, nice!
-    end
-    t = range(0, stop = flow.Ncycles * flow.N * flow.Δt, length = flow.Ncycles * flow.N)
-    start = flow.N
-    a = plot(t[start:end], coeffs[1, start:end], label = "Force", lw = 3, marker = :circle)
-    b = plot(t[start:end], coeffs[2, start:end], label = "Lift", lw = 3, marker = :circle)
-    c = plot(t[start:end], coeffs[3, start:end], label = "Thrust", lw = 3, marker = :circle)
-    d = plot(t[start:end], coeffs[4, start:end], label = "Power", lw = 3, marker = :circle)
-    plot(a, b, c, d, layout = (2, 2), legend = :topleft, size = (800, 800))
-end
 
 begin
     """
@@ -152,10 +113,105 @@ begin
     serialize(path, allofit)
 end
 
-column_data_types = Dict{Symbol, DataType}()
-types = []
-for col in names(allofit) .|> Symbol
-    col_data_type = eltype(allofit[!, col])
-    column_data_types[col] = col_data_type
-    push!(types, col_data_type)
+begin
+    """
+    Redo the above for multiple image swimmers
+    """
+    # Define parameter ranges
+    T = Float32
+    reduced_freq_values = LinRange{T}(0.25, 4, 5)
+    ks = LinRange{T}(0.35, 2.0, 5)
+    a0 = 0.1
+    δs = LinRange{T}(3*a0, 13*a0, 5)./2.0
+
+    num_foils = 2
+
+    allofit = Vector{DataFrame}()
+    allCoeffs = Vector{DataFrame}()
+    # Nested loops to vary parameters
+
+    for reduced_freq in reduced_freq_values
+        for k in ks
+            for δ in δs
+                @show reduced_freq, k, δ
+                # Set motion parameters
+                starting_positions = [0.0  0.0 ; -δ δ ]
+                phases = [pi/2, pi/2,pi/2, pi/2]    
+                fs     = [ reduced_freq, -reduced_freq]
+                ks     = [ -k, k]
+                
+                motion_parameters = [a0 for i in 1:num_foils]
+            
+                foils, flow = create_foils(num_foils, starting_positions, :make_ang;
+                        motion_parameters=motion_parameters, ψ=phases, Ncycles = 5,
+                        k= ks,  Nt = 64, f = fs);
+                
+                wake = Wake(foils)
+                
+
+                # Perform simulations and save results
+                totalN = sum(foil.N for foil in foils)
+                steps = flow.N*flow.Ncycles
+                
+                old_mus, old_phis = zeros(3, totalN), zeros(3, totalN)
+                coeffs = zeros(length(foils), 4, steps)
+                
+                
+                datas = DataFrame(δ = T[],
+                    reduced_freq = T[],
+                    k = T[],
+                    U_inf = T[],
+                    t = T[],
+                    σs = Matrix{T},
+                    panel_velocity = Matrix{T},
+                    position = Matrix{T},
+                    normals = Matrix{T},
+                    wake_ind_vel = Matrix{T},
+                    tangents = Matrix{T},
+                    μs = T[],
+                    pressure = T[])
+                coeff_df = DataFrame(δ = T[],
+                    reduced_freq = T[],
+                    k = T[],
+                    coeffs = Matrix{T})
+
+                for i in 1:steps
+                    coeffs[:,:,1] = time_increment!(flow, foils, wake, old_mus, old_phis)
+                    values = DataFrame( δ = [δ],
+                                        reduced_freq = [reduced_freq],
+                                        k            = [k],
+                                        U_inf        = [flow.Uinf],
+                                        t            = [flow.n * flow.Δt],
+                                        σs           = [vcat([foil.σs for foil in foils]...)],
+                                        panel_vel    = [vcat([foil.panel_vel for foil in foils]...)],
+                                        position     = [vcat([foil.col for foil in foils]...)],
+                                        normals      = [vcat([foil.normals for foil in foils]...)],
+                                        wake_ind_vel = [vcat([foil.wake_ind_vel for foil in foils]...)],
+                                        tangents     = [vcat([foil.tangents for foil in foils]...)],
+                                        μs           = [vcat([foil.μs for foil in foils]...)]
+                                        )        
+                    if i == 1
+                        datas = values
+                    else
+                        append!(datas, values)
+                    end
+                end
+                values = DataFrame(δ = [δ], reduced_freq = [reduced_freq], k = [k], coeffs = [coeffs])
+                if size(coeff_df,1) == 0
+                    coeff_df = values
+                else
+                    append!(coeff_df, values)
+                end
+                
+
+                push!(allofit, datas)
+            end
+        end
+    end    
+    path = joinpath("data", "multipleSwimmers_data.jls")    
+    allofit = vcat(allofit...)
+    serialize(path, allofit)
+    path = joinpath("data", "multipleSwimmers_coeffs.jls")
+    allCoeffs = vcat(allCoeffs...)
+    serialize(path, allCoeffs)
 end

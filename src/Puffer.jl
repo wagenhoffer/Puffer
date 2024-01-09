@@ -24,7 +24,7 @@ export _propel, run_sim, get_performance, time_increment!, solve_n_update!
 export get_phi, get_dmudt!, get_dphidt!, get_dt, roll_values!, get_qt
 
 include("./Utils.jl")
-export defaultDict, f, plot_coeffs, cycle_averaged, spalarts_prune!
+export defaultDict, f, plot_coeffs, cycle_averaged, spalarts_prune!, create_foils
 
 include("./Lesp.jl")
 export set_ledge!, ledge_inf, get_μ!

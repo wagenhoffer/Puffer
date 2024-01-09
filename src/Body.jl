@@ -227,7 +227,7 @@ function next_foil_pos(foil::Foil, flow::FlowParams)
         hframe = rotation(foil.θ) * [0 h]'
         pos .+= hframe        
     else
-        ([foil._foil[1, :] .- foil.pivot foil._foil[2, :] .+
+        pos = ([foil._foil[1, :] .- foil.pivot foil._foil[2, :] .+
         foil.kine.(foil._foil[1, :],foil.f,foil.k,flow.n * flow.Δt)]
          * rotation(-foil.θ))'
     end

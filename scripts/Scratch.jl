@@ -243,67 +243,6 @@ begin
     plot(vx, vy, layout = (1, 2))
 end
 
-"""
-    spalarts_prune!(wake::Wake, flow::FlowParams, foil::Foil; keep=0)
-
-Perform a modification Spalart's wake pruning procedure for a vortex method simulation.
-Spalart, P. R. (1988). Vortex methods for separated flows.
-# Arguments
-- `wake`: A Wake object representing the vortex wake.
-- `flow`: A FlowParams object representing the flow parameters.
-- `foil`: A Foil object representing the airfoil.
-- `keep`: An optional argument (defaulting to 0) that determines how many of the most recent vortices
-          are retained without pruning.
-
-This function modifies the `wake` object in-place. It prunes the vortices by aggregating pairs of vortices 
-that satisfy Spalart's criterion and have the same sign of circulation, indicating they were generated 
-during the same phase of motion. The function updates the positions, circulation, and velocity fields of
-the remaining vortices in the wake.
-
-"""
-
-function spalarts_prune!(wake::Wake, flow::FlowParams, foil::Foil; keep = 0)
-    V0 = 10e-4 * flow.Uinf
-    D0 = 0.1 * foil.chord
-
-    ds = sqrt.(sum(abs2, wake.xy .- te, dims = 1))
-    zs = sqrt.(sum(wake.xy .^ 2, dims = 1))
-
-    mask = abs.(wake.Γ * wake.Γ') .* abs.(zs .- zs') ./
-           (abs.(wake.Γ .+ wake.Γ') .* (D0 .+ ds) .^ 1.5 .* (D0 .+ ds') .^ 1.5) .< V0
-
-    k = 2
-    num_vorts = length(wake.Γ)
-    #the k here in what to keep
-    #to save the last half of a cycle of motion keep = flow.N ÷ 2    
-    while k < num_vorts - keep
-        j = k + 1
-        while j < foil.N + 1
-            if mask[k, j]
-                # only aggregate vortices generated during consistent motion
-                if sign(wake.Γ[k]) == sign(wake.Γ[j])
-                    wake.xnfoils = length(foils)
-                    Ns = [foil.N for foil in foils]
-                    N = sum(Ns)
-                    Ns = [0 cumsum(Ns)...]
-                    doubletMat = zeros(N, N)
-                    sourceMat = zeros(N, N)
-                    edgeMat = zeros(N, N)
-                    
-                    buffers = zeros(nfoils, foils[1].N)
-                    
-                    allcols = [foil.col for foil in foils ]
-            j += 1
-        end
-        k += 1
-    end
-
-    keepers = findall(x -> x != 0.0, wake.Γ)
-    wake.Γ = wake.Γ[keepers]
-    wake.xy = wake.xy[:, keepers]
-    wake.uv = wake.uv[:, keepers]
-    nothing
-end
 
 begin
     #look at the panel normals for a pitching foil
@@ -433,39 +372,6 @@ begin
         color = cgrad(:jet))
     a
 end
-wake = deepcopy(wake2)
-
-wake2 = deepcopy(wake)
-
-#Merge the 2 vortices into the one at k
-#Check possibility of merging the last vortex with the closest 20 vortices
-gamma_j = curfield.tev[1].s
-d_j = sqrt((curfield.tev[1].x - surf_locx)^2 + (curfield.tev[1].z - surf_locz)^2)
-z_j = sqrt(curfield.tev[1].x^2 + curfield.tev[1].z^2)
-
-for i in 2:20
-    gamma_k = curfield.tev[i].s
-    d_k = sqrt((curfield.tev[i].x - surf_locx)^2 + (curfield.tev[i].z - surf_locz)^2)
-    z_k = sqrt(curfield.tev[i].x^2 + curfield.tev[i].z^2)
-
-    fact = abs(gamma_j * gamma_k) * abs(z_j - z_k) /
-           (abs(gamma_j + gamma_k) * (D0 + d_j)^1.5 * (D0 + d_k)^1.5)
-
-    if fact < V0
-        #Merge the 2 vortices into the one at k
-        curfield.tev[i].x = (abs(gamma_j) * curfield.tev[1].x +
-                             abs(gamma_k) * curfield.tev[i].x) /
-                            (abs(gamma_j + gamma_k))
-        curfield.tev[i].z = (abs(gamma_j) * curfield.tev[1].z +
-                             abs(gamma_k) * curfield.tev[i].z) /
-                            (abs(gamma_j + gamma_k))
-        curfield.tev[i].s += curfield.tev[1].s
-
-        popfirst!(curfield.tev)
-
-        break
-    end
-end
 
 ###MESSING AROUND WITH Frequency while in motion###
 begin
@@ -571,50 +477,23 @@ begin
     end
     a
 end
-turn = pi / 7
 
-"""
+function wake_sym(wake::Wake)    
+    @show norm(wake.xy[1,1:2:end] .- wake.xy[1, 2:2:end], Inf)
+    @show norm(wake.xy[2,1:2:end] .+ wake.xy[2, 2:2:end], Inf)
+    @show norm(wake.Γ[1:2:end] .+ wake.Γ[2:2:end], Inf)
+    @show norm(wake.uv[1,1:2:end] .- wake.uv[1, 2:2:end], Inf)
+    @show norm(wake.uv[2,1:2:end] .+ wake.uv[2, 2:2:end], Inf)
+end
 
-nfoils = length(foils)
-Ns = [foil.N for foil in foils]
-N = sum(Ns)
-Ns = [0 cumsum(Ns)...]
-doubletMat = zeros(N, N)
-sourceMat = zeros(N, N)
-edgeMat = zeros(N, N)
+wake_sym(wake)
 
-buffers = zeros(nfoils, N)
-
-
-allpanels = hcat([f.foil for f in foils]...)
-alledges = hcat([f.edge for f in foils]...)
-x1, x2, y = panel_frame(allcols, allpanels)
-ymask = abs.(y) .> ϵ
-y = y .* ymask
-doublet_inf.(x1, x2,y)
-source_inf.(x1, x2, y)
-
-x1, x2, y = panel_frame(allcols, alledges)
-edgeInf = doublet_inf.(x1, x2, y)
-
-x1, x2, y = panel_frame(allcols, foils[1].edge)
-edgeInf = doublet_inf.(x1, x2, y)
-
-
-
-
-nothing
-"""
-
-
-
-V0 = 10e-4 * flow.Uinf
-D0 = 0.1 * foils[1].chord
+V0 = 1e-4 * flow.Uinf
+D0 = foils[1].chord
 te = [foils[1].foil[1,1] 0.0]'
 
 
-mask = abs.(wake.Γ * wake.Γ') .* abs.(zs .- zs') ./
-       (abs.(wake.Γ .+ wake.Γ') .* (D0 .+ ds) .^ 1.5 .* (D0 .+ ds') .^ 1.5) .< V0
+
 
 k = 4
 num_vorts = length(wake.Γ)
@@ -632,7 +511,8 @@ xy = [x y]'
 Γ  = Γ[idx]
 ds = ds[idx]
 zs = zs[idx]
-
+mask = abs.(Γ * Γ') .* abs.(zs .- zs') ./
+       (abs.(Γ .+ Γ') .* (D0 .+ ds) .^ 1.5 .* (D0 .+ ds') .^ 1.5) .< V0
 
 # to save the last half of a cycle of motion keep = flow.N ÷ 2    
 while k < num_vorts 
@@ -658,4 +538,40 @@ while k < num_vorts
 end
 
 # clean up the wake struct
-keepers = findall(x -> x != 0.0, wake.Γ)
+keepers = findall(x -> x != 0.0, Γ)
+
+plot(xy[1,keepers], xy[2,keepers], ms = 4, st = :scatter, label = "", msw = 1, marker_z = -Γ[keepers], color = cgrad(:coolwarm))
+plot!(wake.xy[1, :], wake.xy[2, :], ms = 5, st = :scatter, label = "", msw = 0, marker_z = -wake.Γ, color = cgrad(:coolwarm))
+
+
+chord = 1 
+using Plots
+
+function visualize_schooling(height, length)
+    # Define the coordinates of the swimmers in the rhombus
+    xs = [0, length/2, length, length/2]
+    ys = [height/2, 0, height/2, height]
+
+    # Create a scatter plot of the swimmers
+    
+ 
+    p = scatter(xs, ys, ms = 10, st = :scatter, label = "", msw = 1, color = :blue)
+    xmid = foil.chord/2.0 
+    
+    for (x,y) in zip(xs,ys)
+        plot!(p, foil._foil[1,:] .+ x .- xmid, foil._foil[2,:] .+ y, color = :black, lw = 2)
+    end
+
+    # Connect the swimmers with lines to form the rhombus
+    plot!(p, [xs[1], xs[2]], [ys[1], ys[2]], color = :black, lw = 2)
+    plot!(p, [xs[2], xs[3]], [ys[2], ys[3]], color = :black, lw = 2)
+    plot!(p, [xs[3], xs[4]], [ys[3], ys[4]], color = :black, lw = 2)
+    plot!(p, [xs[4], xs[1]], [ys[4], ys[1]], color = :black, lw = 2)
+
+    # Set the aspect ratio to equal for a proper visualization    
+    plot!(p, aspect_ratio =:true, xlims = (-0.5, length + 0.5), ylims = (-0.5, height + 0.5))
+
+end
+
+# Example usage
+visualize_schooling(0.5, 1.5)
