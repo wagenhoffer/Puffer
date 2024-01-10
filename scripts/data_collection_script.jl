@@ -236,7 +236,7 @@ begin
         for k in k_values
             for δ in δs
                 for ψi in ψs
-                    @show counter, reduced_freq, k, δ
+                    # @show counter, reduced_freq, k, δ , ψi
                     counter +=1
                     # Set motion parameters
                     starting_positions = [0.0  δ; 0.0 0.0 ]
@@ -283,13 +283,14 @@ begin
                             append!(datas, values)
                         end
                     end
-                    coeff_df = DataFrame(δ = [δ], reduced_freq = [reduced_freq], k = [k], coeffs = [coeffs])
+                    coeff_df = DataFrame(δ = [δ], reduced_freq = [reduced_freq], k = [k], ψ=[ψi], coeffs = [coeffs])
                                     
                     push!(allCoeffs, coeff_df)
                     push!(allofit, datas)
                 end
             end
         end
+        @show counter
     end    
     path = joinpath("data", "multipleSwimmers_inline_data.jls")    
     allofit = vcat(allofit...)
