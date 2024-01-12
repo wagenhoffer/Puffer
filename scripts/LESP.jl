@@ -128,7 +128,7 @@ begin
         old_phis = [phi'; old_phis[1:2, :]]
         if animated
             # f = plot_current(foil, wake;window=(foil.col[1,1]-0.25,foil.col[1,1]+0.5))
-            f = plot_current(foil, wake)
+            f = plot(foil, wake)
             frame(anim, f)
         end
         ps[:, i] = p

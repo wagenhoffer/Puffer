@@ -250,7 +250,7 @@ begin
                     @show counter, reduced_freq, k, δ , ψi
                     for i in 1:steps
                   
-                        coeffs[:,:,1] = time_increment!(flow, foils, wake, old_mus, old_phis; mask=[false, true])
+                        coeffs[:,:,i] = time_increment!(flow, foils, wake, old_mus, old_phis; mask=[false, true])
                         values = DataFrame( δ = [δ],
                                             reduced_freq = [reduced_freq],
                                             k            = [k],
@@ -288,3 +288,11 @@ begin
     allCoeffs = vcat(allCoeffs...)
     serialize(path, allCoeffs)
 end
+
+# exploratory views of the inline coefficients
+s12 = allCoeffs[1,:coeffs]
+plt = plot()
+for co  in eachslice(s12,dims=1)
+    plot!(plt, co[2,64*4:end])
+end
+plt
