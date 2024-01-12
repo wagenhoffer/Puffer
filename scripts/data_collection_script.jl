@@ -122,12 +122,13 @@ begin
     reduced_freq_values = LinRange{T}(0.25, 4, 5)
     k_values = LinRange{T}(0.35, 2.0, 5)
     a0 = 0.1
-    δs = LinRange{T}(3*a0, 13*a0, 5)./2.0
+    δs = LinRange{T}(3*a0, 13*a0, 5)./T(2.0)
 
     num_foils = 2
 
     allofit = Vector{DataFrame}()
     allCoeffs = Vector{DataFrame}()
+    datas = Vector{DataFrame}()
     # Nested loops to vary parameters
     counter = 1
     for reduced_freq in reduced_freq_values
@@ -143,7 +144,7 @@ begin
                 
                 motion_parameters = [a0 for i in 1:num_foils]
             
-                foils, flow = create_foils(num_foils, starting_positions, :make_ang;
+                foils, flow = create_foils(num_foils, starting_positions, :make_wave;
                         motion_parameters=motion_parameters, ψ=phases, Ncycles = 5,
                         k= ks,  Nt = 64, f = fs);
                 
@@ -156,29 +157,10 @@ begin
                 
                 old_mus, old_phis = zeros(3, totalN), zeros(3, totalN)
                 coeffs = zeros(length(foils), 4, steps)
-                
-                
-                datas = DataFrame(δ = T[],
-                    reduced_freq = T[],
-                    k = T[],
-                    U_inf = T[],
-                    t = T[],
-                    σs = Matrix{T},
-                    panel_velocity = Matrix{T},
-                    position = Matrix{T},
-                    normals = Matrix{T},
-                    wake_ind_vel = Matrix{T},
-                    tangents = Matrix{T},
-                    μs = T[],
-                    pressure = T[])
-                coeff_df = DataFrame(δ = T[],
-                    reduced_freq = T[],
-                    k = T[],
-                    coeffs = Matrix{T})
-
-                for i in 1:steps
+                                               
+                @time for i in 1:steps
                     coeffs[:,:,1] = time_increment!(flow, foils, wake, old_mus, old_phis)
-                    values = DataFrame( δ = [δ],
+                    vals = DataFrame( δ = [δ],
                                         reduced_freq = [reduced_freq],
                                         k            = [k],
                                         U_inf        = [flow.Uinf],
@@ -192,11 +174,16 @@ begin
                                         μs           = [vcat([foil.μs for foil in foils]...)]
                                         )        
                     if i == 1
-                        datas = values
+                        datas = vals
                     else
-                        append!(datas, values)
+                        append!(datas, vals)
                     end
+
+                    # plot(foils, wake)
                 end
+                # file = "d_$(@sprintf("%.2f", δ))_f_$(reduced_freq)_k_$(k).gif"
+                # path = joinpath("images","gfx_images", file)
+                # gif(movie, path, fps = 30)
                 coeff_df = DataFrame(δ = [δ], reduced_freq = [reduced_freq], k = [k], coeffs = [coeffs])
                                 
                 push!(allCoeffs, coeff_df)
@@ -259,9 +246,10 @@ begin
                     
                     old_mus, old_phis = zeros(3, totalN), zeros(3, totalN)
                     coeffs = zeros(length(foils), 4, steps)
-                                        
-
+                    datas = []                 
+                    @show counter, reduced_freq, k, δ , ψi
                     for i in 1:steps
+                  
                         coeffs[:,:,1] = time_increment!(flow, foils, wake, old_mus, old_phis; mask=[false, true])
                         values = DataFrame( δ = [δ],
                                             reduced_freq = [reduced_freq],
@@ -287,10 +275,11 @@ begin
                                     
                     push!(allCoeffs, coeff_df)
                     push!(allofit, datas)
+                    
                 end
             end
         end
-        @show counter
+        
     end    
     path = joinpath("data", "multipleSwimmers_inline_data.jls")    
     allofit = vcat(allofit...)

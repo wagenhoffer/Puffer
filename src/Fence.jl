@@ -129,6 +129,13 @@ function foilsdf(nfoil, N)
 end
 
 minsmax(foil) = map(x -> minimum(nfoil[1,:]) <= x <= maximum(nfoil[2,:]), dest[1,:])
+function get_first(x)
+    if (typeof(x) <: Vector) & isempty(x)
+            return []
+    else
+        return first(x)
+    end        
+end
 
 
 #TODO: refactor this into smaller functions for testing
@@ -167,31 +174,32 @@ function sdf_fence(wake::Wake, foil::Foil, flow::FlowParams; dest = nothing)
         deez = findall(x -> x == 1, inside)
 
         for i in deez
+
             flip = 1  # Variable to flip the direction of the tangent vortex
             # Check if the vortex is on the top or bottom of the foil
             if dest[2, i] >= mid(wake.xy[1, i])
                 # Construct the spline path for the top of the foil
                 tPath = Spline1D(nfoil[1, N+1:end], nfoil[2, N+1:end] - ms[i] .* nfoil[1, N+1:end] .+ bs[i])
                 if wake.xy[1, i] < dest[1, i]
-                    xint = filter(x -> wake.xy[1, i] <= x <= dest[1, i], roots(tPath))
+                    xint = get_first(filter(x -> wake.xy[1, i] <= x <= dest[1, i], roots(tPath)))
                 else
-                    xint = filter(x -> wake.xy[1, i] >= x >= dest[1, i], roots(tPath))
+                    xint = get_first(filter(x -> wake.xy[1, i] >= x >= dest[1, i], roots(tPath)))
                     flip = -1
                 end
                 # Check if there is an intersection point between the vortex and the foil
                 if !isempty(xint)
                     yint = top(xint)
-                    whichPanel = findlast(xint .>= nfoil[1, N+1:end]) + N
+                    whichPanel = findlast(xint .>= nfoil[1, N:end]) + (N-1)
                 else
-                    whichPanel = findlast(dest[1, i] .>= nfoil[1, N:end]) + N
+                    whichPanel = findlast(dest[1, i] .>= nfoil[1, N:end]) + (N-1)
                 end
             else
                 # Construct the spline path for the bottom of the foil
                 bPath = Spline1D(nfoil[1, N:-1:1], nfoil[2, N:-1:1] - ms[i] .* nfoil[1,  N:-1:1] .+ bs[i])
                 if wake.xy[1, i] < dest[1, i]
-                    xint = filter(x -> wake.xy[1, i] <= x <= dest[1, i], roots(bPath))                    
+                    xint = get_first(filter(x -> wake.xy[1, i] <= x <= dest[1, i], roots(bPath)))
                 else
-                    xint = filter(x -> wake.xy[1, i] >= x >= dest[1, i], roots(bPath))
+                    xint = get_first(filter(x -> wake.xy[1, i] >= x >= dest[1, i], roots(bPath)))
                     flip = -1
                 end
                 if !isempty(xint)
