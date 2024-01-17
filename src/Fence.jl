@@ -172,9 +172,7 @@ function sdf_fence(wake::Wake, foil::Foil, flow::FlowParams; dest = nothing)
 
     while sum(inside) > 0 && iters < 10        
         deez = findall(x -> x == 1, inside)
-
         for i in deez
-
             flip = 1  # Variable to flip the direction of the tangent vortex
             # Check if the vortex is on the top or bottom of the foil
             if dest[2, i] >= mid(wake.xy[1, i])

@@ -26,12 +26,12 @@ begin
     upm[:N] = 64
     upm[:Ncycles] = 4
     upm[:Uinf] = 1.0
-    upm[:kine] = :make_ang
+    upm[:kine] = :make_wave
     upm[:pivot] = 0.0
     upm[:foil_type] = :make_naca
     upm[:thick] = 0.12
     upm[:motion_parameters] = [0.1]
-
+    upm[:ψ] = 0.0
     upm[:f] = f
     upm[:k] = k
     mass = mass
@@ -40,6 +40,7 @@ begin
 
     foil, flow = init_params(; upm...)
     
+    # turns = [LinRange(0, -π/8, flow.N)... -π/8 .*ones(flow.N*(flow.Ncycles-1))...]
     turns = zeros(flow.Ncycles * flow.N)
     wake = Wake(foil)
     Us = zeros(2, flow.Ncycles * flow.N)
@@ -52,7 +53,7 @@ begin
 
 
     anim = Animation()
-    for i in 1:(flow.Ncycles * flow.N)
+    for i in 1:(flow.Ncycles * flow.N)        
         if flow.n != 1
             move_wake!(wake, flow)
             release_vortex!(wake, foil)
@@ -68,7 +69,8 @@ begin
                 U = U,
                 mass = mass,
                 turnto = turns[i],
-                self_prop = true,)
+                self_prop = true)
+            U = [U_init, 0.0]
             # U = (foil)(flow)
         end
         # @show U
@@ -99,7 +101,7 @@ begin
         # Make a fake coeff of thrust based on a sinusiodal signal and force it into
 
         ps[:, i] = p
-        f = plot_current(foil, wake)
+        f = plot(foil, wake)
         plot!(f, ylims = (-1, 1))
         plot!(title = "$(U)")
         frame(anim, f)
@@ -128,7 +130,7 @@ function find_Us(;U_init = 1.0, f=1.0, k=1.0, mass = 1.0, Ncycles = 3)
     upm[:N] = 64
     upm[:Ncycles] = Ncycles
     upm[:Uinf] = 1.0
-    upm[:kine] = :make_ang
+    upm[:kine] = :make_wave
     upm[:pivot] = 0.0
     upm[:foil_type] = :make_naca
     upm[:thick] = 0.12
@@ -223,9 +225,11 @@ end
 begin
     T = Float32
     N = 3
-    fs = LinRange{T}(0.5, 4, N)
-    ks = [0.5, 1.0, 1.5] .|>T
-    masses = [2.0, 1.0, 0.5] .|>T
+    # fs = LinRange{T}(0.5, 4, N)
+    # ks = [0.5, 1.0, 1.5] .|>T
+    fs = [1.0].|>T
+    ks = [1.0].|>T
+    masses = [10.0, 1.0, 0.1] .|>T
     Uinits = zeros(N,N,N)
     for (l,mass) in enumerate(masses)
         for (j,k) in enumerate(ks)        

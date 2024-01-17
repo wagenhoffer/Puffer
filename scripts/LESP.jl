@@ -1,12 +1,11 @@
 # include("../src/BemRom.jl")
 using Puffer
-using SpecialFunctions
+using BSplineKit
 using Plots
 ###functions to move to BemRom###
-function plot_ledge(foil::Foil, ledge)
-    a = plot(foil.foil[1, :], foil.foil[2, :], marker = :hex, label = "Foil")
-    plot!(a, foil.col[1, :], foil.col[2, :], marker = :dot, lw = 0, label = "")
-    plot!(a, ledge[1, :], ledge[2, :], label = "LESP", aspect_ratio = :equal)
+function plot_ledge(foil::Foil)
+    a = plot(foil.foil[1, :], foil.foil[2, :],  label = "Foil")    
+    plot!(a, foil.ledge[1, :], foil.ledge[2, :], label = "LESP", aspect_ratio = :equal)
     a
 end
 
@@ -15,9 +14,7 @@ function set_ledge!(foil::Foil, flow::FlowParams)
     le_norm = sum(foil.normals[:, front:(front + 1)], dims = 2) / 2.0 * flow.Uinf * flow.Δt
     #initial the ledge
     front += 1
-    foil.ledge = [foil.foil[:, front] foil.foil[:, front] .+ le_norm * 0.4 foil.foil[:,
-        front] .+
-                                                                           le_norm * 1.4]
+    foil.ledge = [foil.foil[:,front] foil.foil[:,front] .+ le_norm*0.4 foil.foil[:,front] .+ le_norm*1.4 ]
     # if flow.n ==1
     #     foil.ledge = [foil.foil[:,front] foil.foil[:,front] .+ le_norm*0.4 foil.foil[:,front] .+ le_norm*1.4 ]
     # else
@@ -42,11 +39,8 @@ function get_μ!(foil::Foil, rhs, A, le_inf, buff, lesp)
     if !lesp
         foil.μs = A \ (-rhs * foil.σs - buff)[:]
     else
-        foil.μs = (A + le_inf) \ (-rhs * foil.σs - buff)[:]
-        set_ledge_strength!(foil)
-    end
-    set_edge_strength!(foil)
-
+        foil.μs = (A + le_inf) \ (-rhs * foil.σs - buff)[:]       
+    end    
     nothing
 end
 ### ###
@@ -55,16 +49,17 @@ fixedangle = deepcopy(defaultDict)
 fixedangle[:N] = 64
 fixedangle[:Nt] = 64
 fixedangle[:Ncycles] = 3
-fixedangle[:f] = 1.0
-fixedangle[:Uinf] = 1
+fixedangle[:f] = 0.5
+fixedangle[:Uinf] = 1.0
 # fixedangle[:kine] = :make_eldredge
 fixedangle[:kine] = :make_heave_pitch
-θ0 = deg2rad(0.0)
+fixedangle[:thick] = 0.12
+θ0 = deg2rad(30.0)
 h0 = 0.0
 fixedangle[:motion_parameters] = [h0, θ0]
 # fixedangle[:motion_parameters] = [θ0, 1000.]
-fixedangle[:aoa] = deg2rad(19)
-fixedangle[:pivot] = 0.5
+fixedangle[:aoa] = deg2rad(0.0)
+fixedangle[:pivot] = 0.0
 
 # delete!(fixedangle, :motion_parameters)
 global lesp = false
@@ -89,7 +84,17 @@ begin
     anim = Animation()
     # movie = @animate for i in 1:flow.Ncycles*flow.N
     front = foil.N ÷ 2
-    for i in 1:(flow.Ncycles * flow.N)
+    dest = [0.0 0.0]'
+    lespcont(p) = true #length(filter(x -> x > 1e8,  p[(front - 1):(front + 1)])) > 0
+    for i in 1:Int((flow.Ncycles * flow.N)*.5 )
+        if i != 1                        
+            
+            # dest = hcat(wake.xy[:,1:2], dest)
+            wake.xy = sdf_fence(wake, foil, flow;dest = dest)
+            release_vortex!(wake, foil)
+        end
+        (foil)(flow)
+        set_ledge!(foil, flow)
         A, rhs, edge_body = make_infs(foil)
         le_inf, le_buff = ledge_inf(foil)
         setσ!(foil, flow)
@@ -101,33 +106,33 @@ begin
         foil.σs -= normal_wake_ind[:]
         buff = edge_body * foil.μ_edge[1]
         buff += le_buff * foil.μ_ledge[1]
-        get_μ!(foil, rhs, A, le_inf, buff, false)
+        lesp = false
+        get_μ!(foil, rhs, A, le_inf, buff, lesp)
         p = panel_pressure(foil, flow, old_mus, old_phis, phi)
-        if length(filter(x -> x > 1.0, p[(front - 1):(front + 1)])) > 0
-            get_μ!(foil, rhs, A, le_inf, buff, true)
+        if lespcont(p)
+            lesp = true
+            get_μ!(foil, rhs, A, le_inf, buff, lesp)                        
             p = panel_pressure(foil, flow, old_mus, old_phis, phi)
         else
+            @show "no LESP"            
             foil.μ_ledge[2] = foil.μ_ledge[1]
             foil.μ_ledge[1] = 0.0
-        end
-        # end    
-        coeffs[:, i] = get_performance(foil, flow, p)
-
+        end  
+        set_ledge_strength!(foil; lesp = lesp)
+        set_edge_strength!(foil)
         cancel_buffer_Γ!(wake, foil)
+        
+        coeffs[:, i] = get_performance(foil, flow, p)        
+
         body_to_wake!(wake, foil, flow)
+        #ledge to wake velocity
+        # wake.uv .+= vortex_to_target(foil.ledge, wake.xy, [-foil.μ_ledge[1], foil.μ_ledge[1]-foil.μ_ledge[2], foil.μ_ledge[2] ], flow)
         wake_self_vel!(wake, flow)
-        # sdf_fence!(wake, foil, flow)    
-        move_wake!(wake, flow)
-        # time_increment!(flow, foil, wake)         
-        release_vortex!(wake, foil)
-        (foil)(flow)
-        #LEading edge is separate for now, rollin it into the main loop        
-        #LESP
-        set_ledge!(foil, flow)
+        dest = wake.xy + wake.uv * flow.Δt
         old_mus = [foil.μs'; old_mus[1:2, :]]
         old_phis = [phi'; old_phis[1:2, :]]
-        if animated
-            # f = plot_current(foil, wake;window=(foil.col[1,1]-0.25,foil.col[1,1]+0.5))
+ 
+        if animated        
             f = plot(foil, wake)
             frame(anim, f)
         end
@@ -138,11 +143,15 @@ begin
     end
 end
 begin
-    a1 = plot(pus, label = "")
-    b2 = plot(ps, label = "")
-    c3 = plot(ps .+ pus, label = "")
-    plot(a1, b2, c3, layout = (3, 1))
+    acc_lens = 0.5 * foil.panel_lengths[1:(end - 1)] + 0.5 * foil.panel_lengths[2:end]
+    acc_lens = [0; cumsum(acc_lens)]
+
+    S = interpolate(acc_lens, p[:], BSplineOrder(3))
+    dp = Derivative(1) * S
+    dp = -dmu.(acc_lens)
+    plot(dp)
 end
+
 begin
     t = LinRange(0, flow.Ncycles / foil.f, flow.Ncycles * flow.N)
     a1 = contour(t, 1:(foil.N), (ps + pus), colors = :jet, label = "")

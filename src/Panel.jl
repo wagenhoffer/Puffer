@@ -144,16 +144,17 @@ function set_edge_strength!(foil::Foil)
         TODO: Extend to perform streamline based Kutta condition
     """
     foil.μ_edge[2] = foil.μ_edge[1]
+    
     foil.μ_edge[1] = foil.μs[end] - foil.μs[1]
     nothing
 end
-function set_ledge_strength!(foil::Foil)
+function set_ledge_strength!(foil::Foil; lesp = true)
     """Assumes that foil.μs has been set for the current time step 
-        TODO: Extend to perform streamline based Kutta condition
+        lesp is if the leading edge is a stagnation point is active
     """
     mid = foil.N ÷ 2
     foil.μ_ledge[2] = foil.μ_ledge[1]
-    foil.μ_ledge[1] = foil.μs[mid] - foil.μs[mid + 1]
+    foil.μ_ledge[1] = lesp ? foil.μs[mid] - foil.μs[mid + 1] : 0.0
     nothing
 end
 

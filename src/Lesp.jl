@@ -4,15 +4,15 @@ function set_ledge!(foil::Foil, flow::FlowParams)
     le_norm = sum(foil.normals[:, front:(front + 1)], dims = 2) / 2.0 * flow.Uinf * flow.Δt
     #initial the ledge
     front += 1
-    # foil.ledge = [foil.foil[:,front] foil.foil[:,front] .+ le_norm*0.4 foil.foil[:,front] .+ le_norm*1.4 ]
-    if flow.n == 1
-        foil.ledge = [foil.foil[:, front] foil.foil[:, front] .+ le_norm * 0.4 foil.foil[:,
-            front] .+
-                                                                               le_norm * 1.4]
-    else
-        foil.ledge = [foil.foil[:, front] foil.foil[:, front] .+ le_norm * 0.4 foil.ledge[:,
-            2]]
-    end
+    foil.ledge = [foil.foil[:,front] foil.foil[:,front] .+ le_norm*0.4 foil.foil[:,front] .+ le_norm*1.4 ]
+    # if flow.n == 1
+    #     foil.ledge = [foil.foil[:, front] foil.foil[:, front] .+ le_norm * 0.4 foil.foil[:,
+    #         front] .+
+    #                                                                            le_norm * 1.4]
+    # else
+    #     foil.ledge = [foil.foil[:, front] foil.foil[:, front] .+ le_norm * 0.4 foil.ledge[:,
+    #         2]]
+    # end
 end
 
 function ledge_inf(foil::Foil)

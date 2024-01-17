@@ -99,7 +99,7 @@ function release_vortex!(wake::Wake, foil::Foil)
     wake.uv = [wake.uv .* 0.0 [0.0, 0.0]]
 
     if any(foil.μ_ledge .!= 0)
-        wake.xy = [wake.xy foil.ledge[:, 2]]
+        wake.xy = [wake.xy foil.ledge[:, 3]]
         wake.Γ = [wake.Γ..., (foil.μ_ledge[1] - foil.μ_ledge[2])]
         wake.uv = [wake.uv .* 0.0 [0.0, 0.0]]
     end
