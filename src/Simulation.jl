@@ -153,12 +153,13 @@ function time_increment!(flow::FlowParams, foil::Foil, wake::Wake)
     normal_wake_ind = sum(foil.wake_ind_vel .* foil.normals, dims = 1)'
     foil.σs -= normal_wake_ind[:]
     buff = edge_body * foil.μ_edge[1]
-    foil.μs = A \ (-rhs * foil.σs - buff)[:]
+    rhs = (-rhs * foil.σs - buff)[:]
+    foil.μs = A \ rhs
     set_edge_strength!(foil)
     cancel_buffer_Γ!(wake, foil)
     body_to_wake!(wake, foil, flow)
     wake_self_vel!(wake, flow)
-    nothing
+    rhs
 end
 
 function time_increment!(flow::FlowParams{T}, foils::Vector{Foil{T}}, wake::Wake{T}, old_mus::Matrix{T}, old_phis::Matrix{T};mask=nothing) where T<:Real

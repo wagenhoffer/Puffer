@@ -188,7 +188,7 @@ end
 
 
 convin = Chain(SkipConnection(convenc[1:3],         
-            (mx,x) -> mx + sum(x[3:end-2,:,:,:],dims = [2,3])),
+        (mx,x) -> mx + sum(x[3:end-2,:,2,:] .* x[3:end-2,:,3:4,:],dims = [2,3])),
         x->reshape(x,(size(x,1), size(x,4))),convenc[end] ) |> gpu
 (x,y) = first(dataloader).|>gpu  
 y|>size   

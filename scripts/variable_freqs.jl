@@ -1,4 +1,4 @@
-"this script will test using variable frequencies across a cycle of motion"
+# "this script will test using variable frequencies across a cycle of motion"
 
 
 using Puffer
@@ -10,7 +10,7 @@ ang[:Nt] = 64
 ang[:Ncycles] = 2
 ang[:f] = 1.0
 ang[:Uinf] = 1
-ang[:kine] = :make_ang
+ang[:kine] = :make_wave
 a0 = 0.1
 ang[:motion_parameters] = [a0]
 
@@ -31,11 +31,9 @@ begin
         win = (minimum(foil.foil[1, :]') - foil.chord / 2.0,
             maximum(foil.foil[1, :]) + foil.chord * 2)
 
-        # if i % flow.N == 0
-        #     spalarts_prune!(wake, flow, foil; keep = flow.N ÷ 2)
-        # end
+
         win = nothing
-        f = plot_current(foil, wake; window = win)
+        f = plot(foil, wake)
         f
     end
     gif(movie, "./images/handp.gif", fps = 30)
@@ -53,7 +51,7 @@ begin
         else
             Δt = flow.Δt/2
         end
-        out = foil.kine.(foil.col[1, :], foil.f, foil.k, n * Δt)
+        out = foil.kine.(foil.col[1, :], foil.f, foil.k, n * Δt, foil.ψ)
         p = plot(out[1:32],  label = "")
         title!("$n")
         ylims!(-0.1,0.1)
@@ -73,7 +71,7 @@ begin
         else
             f = foil.f/2
         end
-        out = foil.kine.(foil.col[1, :], f, foil.k, n * flow.Δt)
+        out = foil.kine.(foil.col[1, :], f, foil.k, n * flow.Δt,  foil.ψ)
         p = plot(out[1:32],  label = "")
         title!("$n")
         ylims!(-0.1,0.1)
@@ -82,6 +80,7 @@ begin
     
     gif(movie, "./images/variable_freq.gif", fps = 10)
 end
+
 begin
     num = 128
     var = sin.(2π.*LinRange(0,1,num))
@@ -91,7 +90,7 @@ begin
         foil.f = f
         # need to ensure that the velocity from panels makes sense and then
         # we can move to pressure
-        out = foil.kine.(foil.col[1, :], foil.f, foil.k, n * flow.Δt)
+        out = foil.kine.(foil.col[1, :], foil.f, foil.k, n * flow.Δt,   foil.ψ)
         p = plot(out[1:32],  label = "")
         title!("$n")
         ylims!(-0.1,0.1)

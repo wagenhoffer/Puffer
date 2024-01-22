@@ -121,7 +121,7 @@ begin
     serialize(path, allofit)
 end
 
-begin
+ begin
     """
     Redo the above for multiple image swimmers
     """

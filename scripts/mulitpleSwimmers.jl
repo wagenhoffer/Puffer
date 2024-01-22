@@ -151,8 +151,8 @@ end
 begin
     num_foils = 2
     # starting_positions = [2.0 1.0 1.0 0.0; 0.0 1.0 -1.0 0.0]
-    starting_positions = [1.5 1.5;  0.15 -0.15 ]
-    phases = [pi, 0.0]    
+    starting_positions = [1.5 0.0;  0.15 0.15 ]
+    phases = [-pi, 0.0]    
     fs = [ 2.0, 2.0]
     ks = [ 1.0, 1.0]
     a0 = 0.1
@@ -180,7 +180,7 @@ begin
         #     spalarts_prune!(wake, flow, foils; te =[foils[1].foil[1,1] 0.0]' )
         # end
         # (foils)(flow)
-        plot(foils, wake)#; xlims=xlims, ylims=ylims)
+        plot(foils, wake; size=(1200,800))#; xlims=xlims, ylims=ylims)
     end
     gif(movie, "newMulti.gif", fps = 30)
 end
