@@ -26,9 +26,9 @@ function build_ae_layers(layer_sizes, activation = tanh)
     Chain(encoder = encoder, decoder = decoder)
 end
 
-mp = ModelParams([64,32,16], 0.01, 1_000, 32, errorL2)
+mp = ModelParams([64,32,16], 0.01, 1_000, 2048, errorL2)
 
-data = deserialize(joinpath("data", "starter_data.jls"))
+data = deserialize(joinpath("data", "single_swimmer_ks_0.35_2.0_fs_0.25_4.0_ang_car.jls"))
 RHS = data[:, :RHS]
 μs = data[:, :μs]
 
@@ -58,7 +58,7 @@ N
 # 1. mimicry of FFT convolutions
 # 2. further mimicry of FFT convolutions, with data truncation
 # 3. 2D->1D convolution 
-# 4. reshape for testing 
+# 4. reshape for testing ​
 # 5. dense layer account for missing physics/data
 # Wrap it all in a ResNet; mess with this in the future for better scaling
 convenc = Chain(Conv((4,2), C=>C, Flux.tanh, pad=SamePad()),                
@@ -81,14 +81,18 @@ B_DNN = SkipConnection(Chain(
     enc = AEb[1],
     dec = AEb[2],
     convdec = convdec
-), .*)|>gpu
+), .+)|>gpu
 
 
 DNNstate = Flux.setup(Adam(mp.η), B_DNN)
 μstate = Flux.setup(Adam(mp.η), μAE)
 
-dataloader = DataLoader((inputs.|>Float32, hcat(RHS...).|>Float32), batchsize=2048, shuffle=true)
-μloader = DataLoader(hcat(μs...).|>Float32, batchsize=2048, shuffle=true)
+dataloader = DataLoader((inputs.|>Float32, hcat(RHS...).|>Float32), batchsize= mp.batchsize, shuffle=true)
+μloader = DataLoader(hcat(μs...).|>Float32, batchsize= mp.batchsize, shuffle=true)
+
+#make an explicit error which is the difference of first and last values -> Γ released
+vortexError(x,y) = sum(abs2,(x[end,:] - x[1,:])-(y[end] - y[1]))/sum(abs2, y[end] - y[1])
+vortexError(x,y) = Flux.mse(x[end,:] - x[1,:],y[end,:] - y[1,:])/Flux.mse(y[end,:] - y[1,:], 0.0)
 
 # Train the solution AE
 begin
@@ -99,11 +103,12 @@ begin
             ls = 0.0
             grads = Flux.gradient(μAE) do m
                 # Evaluate model and loss inside gradient context:
-                ls = errorL2(m(y), y) 
+                ls = errorL2(m(y), y) + vortexError(m(y), y)
             end
             Flux.update!(μstate, μAE, grads[1])
             push!(losses, ls)  # logging, outside gradient context
         end
+        
         if epoch % 100 == 0
             println("Epoch: $epoch, Loss: $(losses[end])")
         end
@@ -119,7 +124,7 @@ end
 begin
     #train the forcing function 
     losses = []
-    @time for i=1:mp.epochs
+    @time for i=1:2_500
         for (x, y) in dataloader
             x = x |> gpu
             y = y |> gpu
@@ -132,9 +137,9 @@ begin
                 mcaex = m[2:3](mcx) # model -> conv -> AE x
                 encerr = errorL2(mcx, y) # does the conv layer learn the RHS?
                 decerr1 = errorL2(mcaex, y) # does the AE layer work for input?
-                # decerr2 = errorL2(mcaex, mcx) # does the AE layer work for conv input?
+                decerr2 = errorL2(mcaex, mcx) # does the AE layer work for conv input?
                 # encdecerr = errorL2(m[4](m[1](x)), x) # just test Conv and ConvTranspose
-                ls = converr + encerr + decerr1 
+                ls = encerr + decerr1 + decerr2
                 
             end
             Flux.update!(DNNstate, B_DNN, grads[1])
@@ -182,6 +187,49 @@ begin
 end
 
 
+convin = Chain(SkipConnection(convenc[1:3],         
+            (mx,x) -> mx + sum(x[3:end-2,:,:,:],dims = [2,3])),
+        x->reshape(x,(size(x,1), size(x,4))),convenc[end] ) |> gpu
+(x,y) = first(dataloader).|>gpu  
+y|>size   
+size(x)
+convenc[1:3](x) |> size
+convin(x)
+convinstate = Flux.setup(Adam(mp.η), convin)
+begin
+    #train the forcing function 
+    losses = []
+    @time for i=1:500
+        for (x, y) in dataloader
+            x = x |> gpu
+            y = y |> gpu
+            ls = 0.0
+            grads = Flux.gradient(convin) do model
+                # Evaluate model and loss inside gradient context:                
+                ls = errorL2(model(x), y) # error over entire model
+                
+            end
+            Flux.update!(convinstate, convin, grads[1])
+            push!(losses, ls)  # logging, outside gradient context
+        end
+        if i % 100 == 0
+            println("Epoch: $i, Loss: $(losses[end])")
+        end
+        
+    end
+    plot(losses, label="loss")
+end
+begin 
+    which = rand(1:size(dataloader.data[1],4))
+    x = dataloader.data[1][:,:,:,which:which]|>gpu
+    y = dataloader.data[2][:,which:which]|>cpu
+    plot(y, label="real")
+    plot!(convin(x)|>cpu, label="conv")
+end
+
+
+
+
 # Let's build the Lν = f model
 # Define the model
 L = Chain(Dense(mp.layers[end], mp.layers[end]; bias=false))|>gpu
@@ -192,7 +240,7 @@ L = Chain(Dense(mp.layers[end], mp.layers[end]; bias=false))|>gpu
 #μsloader
 
 latentdata = DataLoader((νs=hcat(νs...), βs=βs, μs = hcat(μs...).|>Float32,
-             Bs =inputs.|>Float32), batchsize=2048, shuffle=true)
+             Bs =inputs.|>Float32), batchsize= mp.batchsize, shuffle=true)
 
 Lopts = Flux.setup(Adam(mp.η), L)
 

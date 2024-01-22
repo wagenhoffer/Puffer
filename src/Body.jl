@@ -115,28 +115,6 @@ function make_vandevooren(N; chord = 1.0, thick = 0.75, K = 1.93)
     [x'; z']
 end
 
-function make_waveform(a0 = 0.1, a = [0.367, 0.323, 0.310]; T = Float64)
-    a0 = T(a0)
-    a = a .|> T
-    f = k = T(1)
-
-    amp(x, a) = a[1] + a[2] * x + a[3] * x^2
-    h(x, f, k, t) = a0 * amp(x, a) * sin(2π * (k * x - f * t)) .|> T
-    # h(x,t) = f,k -> h(x,f,k,t)
-    h
-end
-
-function make_ang(a0 = 0.1; a = [0.367, 0.323, 0.310])
-    a0 = a0
-    a = a
-    f = π
-    k = 0.5
-
-    amp(x, a) = a[1] + a[2] * x + a[3] * x^2
-    h(x, f, k, t) = a0 * amp(x, a) * sin(2π * (k * x - f * t ))
-    h
-end
-
 function make_wave(a0 = 0.1; a = [0.367, 0.323, 0.310])
     a0 = a0
     a = a
@@ -144,9 +122,12 @@ function make_wave(a0 = 0.1; a = [0.367, 0.323, 0.310])
     k = 0.5
 
     amp(x, a) = a[1] + a[2] * x + a[3] * x^2
-    h(x, f, k, t, ψ) = a0 * amp(x, a) * sin(2π * (k * x - f * t ) + ψ)
+    h(x, f, k, t, ψ) = a0 * amp(x, a) * sin(2π * (k * x - f * t) + ψ)
     h
 end
+
+make_ang(a0 = 0.1; a = [0.367, 0.323, 0.310]) = make_wave(a0; a = a)
+make_car(a0) = make_wave(a0; a=[0.2,-0.825, 1.625])
 
 function make_heave_pitch(h0, θ0; T = Float64)
     θ(f, t, ψ) = θ0 * sin(2 * π * f * t + ψ)
@@ -227,7 +208,7 @@ rotation(α) = [cos(α) -sin(α)
 function next_foil_pos(foil::Foil, flow::FlowParams)
     #TODO: rework for self propelled swimming
     #perform kinematics
-    Δxy = flow.Uinf * flow.Δt
+    Δxy = flow.Uinf .* flow.Δt
     LE = foil.LE
     xle1 = [cos(foil.θ + π), sin(foil.θ + π)] .* Δxy
     LE += xle1[:]
@@ -239,7 +220,7 @@ function next_foil_pos(foil::Foil, flow::FlowParams)
         pos .+= hframe        
     else
         pos = ([foil._foil[1, :] .- foil.pivot foil._foil[2, :] .+
-        foil.kine.(foil._foil[1, :], foil.f,foil.k,flow.n * flow.Δt, foil.ψ)]
+        foil.kine.(foil._foil[1, :],foil.f,foil.k,flow.n * flow.Δt)]
          * rotation(-foil.θ))'
     end
     pos .+= LE
