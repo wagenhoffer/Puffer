@@ -14,6 +14,7 @@ struct ModelParams
     epochs::Int
     batchsize::Int
     lossfunc::Function
+    dev
 end
 
 errorL2(x, y) = Flux.mse(x,y)/Flux.mse(y,0.0) 
@@ -26,9 +27,9 @@ function build_ae_layers(layer_sizes, activation = tanh)
     Chain(encoder = encoder, decoder = decoder)
 end
 
-mp = ModelParams([64,32,16], 0.01, 1_000, 2048, errorL2)
+mp = ModelParams([64,32,16], 0.01, 1_000, 512, errorL2, cpu)
 
-data = deserialize(joinpath("data", "single_swimmer_ks_0.35_2.0_fs_0.25_4.0_ang_car.jls"))
+data = deserialize(joinpath("data", "single_swimmer_ks0.35-2.0_fs0.25-4.0.jls"))
 RHS = data[:, :RHS]
 μs = data[:, :μs]
 
@@ -58,7 +59,7 @@ N
 # 1. mimicry of FFT convolutions
 # 2. further mimicry of FFT convolutions, with data truncation
 # 3. 2D->1D convolution 
-# 4. reshape for testing ​
+# 4. reshape for testing 
 # 5. dense layer account for missing physics/data
 # Wrap it all in a ResNet; mess with this in the future for better scaling
 convenc = Chain(Conv((4,2), C=>C, Flux.tanh, pad=SamePad()),                
@@ -82,18 +83,86 @@ B_DNN = SkipConnection(Chain(
     dec = AEb[2],
     convdec = convdec
 ), .+)|>gpu
+B_DNN = Chain(
+    convenc = convenc,
+    enc = AEb[1],
+    dec = AEb[2],
+    convdec = convdec
+)
 
+#+++++
+begin
+    σs = data[:, :σs]
+    μs = data[:, :μs]
+    lNNloader = DataLoader((hcat(σs...).|>Float32, hcat(RHS...).|>Float32), batchsize=mp.batchsize, shuffle=true)
+    lNN = Chain(Dense(64,16, tanh),
+                Dense(16,16, tanh),
+                Dense(16,64, tanh))
 
+    lNNstate = Flux.setup(Adam(mp.η), lNN)
+    # x_in = [position' row.normals' row.wake_ind_vel' row.panel_vel' ]
+    # sum(σs .== inputs[3:end-2,:,2,:].*(inputs[3:end-2,:,3,:]+inputs[3:end-2,:,4,:])  )
+
+end
+# Train the solution AE
+begin
+    teError(x,y) = Flux.mse(x[1,:]-x[end,:],y[1,:]-y[end,:])#/Flux.mse(y[end,:]-y[1,:],0.0)
+    # losses = []
+    for epoch = 1:1_000
+        for (x, y) in lNNloader        
+            
+            ls = 0.0
+            grads = Flux.gradient(lNN) do m
+                # Evaluate model and loss inside gradient context:
+                ls = errorL2(m(x),y) +teError(m(x), y)
+            end
+            Flux.update!(lNNstate, lNN, grads[1])
+            push!(losses, ls)  # logging, outside gradient context
+        end
+        if epoch % 100 == 0
+            println("Epoch: $epoch, Loss: $(losses[end])")
+        end
+    end
+    which = rand(1:size(lNNloader.data[1],2))
+    plot(lNNloader.data[2][:,which], label="signal")
+    a = plot!(lNN(lNNloader.data[1][:,which]), label="reconstructed")
+    title!("RHS")
+    b = plot(lNNloader.data[1][:,which], label="σ")
+    plot!(b, lNNloader.data[2][:,which], label="rhs")
+    plot(a,b, layout = (2,1), size = (1200,800))
+end
+
+#+++++
 DNNstate = Flux.setup(Adam(mp.η), B_DNN)
 μstate = Flux.setup(Adam(mp.η), μAE)
+convencstate = Flux.setup(Adam(mp.η), convenc)
+dataloader = DataLoader((inputs.|>Float32, hcat(RHS...).|>Float32), batchsize=mp.batchsize, shuffle=true)
+μloader = DataLoader(hcat(μs...).|>Float32, batchsize=mp.batchsize, shuffle=true)
 
-dataloader = DataLoader((inputs.|>Float32, hcat(RHS...).|>Float32), batchsize= mp.batchsize, shuffle=true)
-μloader = DataLoader(hcat(μs...).|>Float32, batchsize= mp.batchsize, shuffle=true)
-
-#make an explicit error which is the difference of first and last values -> Γ released
-vortexError(x,y) = sum(abs2,(x[end,:] - x[1,:])-(y[end] - y[1]))/sum(abs2, y[end] - y[1])
-vortexError(x,y) = Flux.mse(x[end,:] - x[1,:],y[end,:] - y[1,:])/Flux.mse(y[end,:] - y[1,:], 0.0)
-
+begin
+    # try to train the convenc only
+    losses = []
+    for epoch = 1:1_000
+        for (x, y) in dataloader        
+            
+            ls = 0.0
+            grads = Flux.gradient(convenc) do m
+                # Evaluate model and loss inside gradient context:
+                ls = errorL2(m(x),y) 
+            end
+            Flux.update!(convencstate, convenc, grads[1])
+            push!(losses, ls)  # logging, outside gradient context
+        end
+        if epoch % 100 == 0
+            println("Epoch: $epoch, Loss: $(losses[end])")
+        end
+    end
+end
+begin
+    which = rand(1:size(dataloader.data[1],4))
+    plot(dataloader.data[2][:,which], label = "",lw=4,c=:red)
+    plot!(convenc(dataloader.data[1][:,:,:,which:which]), label = "recon",lw=0.25, marker=:circle)
+end
 # Train the solution AE
 begin
     losses = []
@@ -103,12 +172,11 @@ begin
             ls = 0.0
             grads = Flux.gradient(μAE) do m
                 # Evaluate model and loss inside gradient context:
-                ls = errorL2(m(y), y) + vortexError(m(y), y)
+                ls = errorL2(m(y), y) 
             end
             Flux.update!(μstate, μAE, grads[1])
             push!(losses, ls)  # logging, outside gradient context
         end
-        
         if epoch % 100 == 0
             println("Epoch: $epoch, Loss: $(losses[end])")
         end
@@ -124,28 +192,28 @@ end
 begin
     #train the forcing function 
     losses = []
-    @time for i=1:2_500
+    @time for i=1:100
         for (x, y) in dataloader
             x = x |> gpu
             y = y |> gpu
             ls = 0.0
-            grads = Flux.gradient(B_DNN) do model
+            grads = Flux.gradient(B_DNN) do m
                 # Evaluate model and loss inside gradient context:
-                m = model.layers #remove the ResNet
-                converr = errorL2(model(x), x) # error over entire model
+                # m = model.layers #remove the ResNet
+                # converr = errorL2(model(x), x) # error over entire model
                 mcx = m[1](x) # model -> conv x
                 mcaex = m[2:3](mcx) # model -> conv -> AE x
                 encerr = errorL2(mcx, y) # does the conv layer learn the RHS?
                 decerr1 = errorL2(mcaex, y) # does the AE layer work for input?
                 decerr2 = errorL2(mcaex, mcx) # does the AE layer work for conv input?
                 # encdecerr = errorL2(m[4](m[1](x)), x) # just test Conv and ConvTranspose
-                ls = encerr + decerr1 + decerr2
+                ls = encerr + decerr1 
                 
             end
             Flux.update!(DNNstate, B_DNN, grads[1])
             push!(losses, ls)  # logging, outside gradient context
         end
-        if i % 100 == 0
+        if i % 10 == 0
             println("Epoch: $i, Loss: $(losses[end])")
         end
         
@@ -160,7 +228,7 @@ begin
     # @show inputs[1,1,6,which:which]
     plot(dataloader.data[2][:,which], label = "",lw=4,c=:red)
                 
-    x1 = reshape(B_DNN(dataloader.data[1][:,:,:,which:which]|>gpu)[:,:,1:4,:], 
+    x1 = reshape(B_DNN(dataloader.data[1][:,:,:,which:which])[:,:,1:4,:], 
                      (68,8))|>cpu         
     x2 = reshape(dataloader.data[1][:,:,1:4,which:which], (68,8))
     pos = plot(x1[:,1:2], label = "", lw=0.25, marker=:circle)
@@ -175,8 +243,8 @@ begin
     panelvel = plot(x1[:,7:8], label = "", lw=0.25, marker=:circle)
     plot!(panelvel, x2[:,7:8], label = "",lw=3)
     title!("Panel Velocity")
-    bDNN = B_DNN.layers[1](dataloader.data[1][:,:,:,which:which]|>gpu)
-    bAE  = B_DNN.layers[1:3](dataloader.data[1][:,:,:,which:which]|>gpu)
+    bDNN = B_DNN[1](dataloader.data[1][:,:,:,which:which])
+    bAE  = B_DNN[1:3](dataloader.data[1][:,:,:,which:which])
     bTrue = dataloader.data[2][:,which:which]
     rhsPlot = plot(bDNN, label="Convolution", lw=0.25, marker=:circle)
     plot!(rhsPlot, bAE, label="AE", lw=0.25, marker=:circle)
@@ -187,60 +255,15 @@ begin
 end
 
 
-convin = Chain(SkipConnection(convenc[1:3],         
-        (mx,x) -> mx + sum(x[3:end-2,:,2,:] .* x[3:end-2,:,3:4,:],dims = [2,3])),
-        x->reshape(x,(size(x,1), size(x,4))),convenc[end] ) |> gpu
-(x,y) = first(dataloader).|>gpu  
-y|>size   
-size(x)
-convenc[1:3](x) |> size
-convin(x)
-convinstate = Flux.setup(Adam(mp.η), convin)
-begin
-    #train the forcing function 
-    losses = []
-    @time for i=1:500
-        for (x, y) in dataloader
-            x = x |> gpu
-            y = y |> gpu
-            ls = 0.0
-            grads = Flux.gradient(convin) do model
-                # Evaluate model and loss inside gradient context:                
-                ls = errorL2(model(x), y) # error over entire model
-                
-            end
-            Flux.update!(convinstate, convin, grads[1])
-            push!(losses, ls)  # logging, outside gradient context
-        end
-        if i % 100 == 0
-            println("Epoch: $i, Loss: $(losses[end])")
-        end
-        
-    end
-    plot(losses, label="loss")
-end
-begin 
-    which = rand(1:size(dataloader.data[1],4))
-    x = dataloader.data[1][:,:,:,which:which]|>gpu
-    y = dataloader.data[2][:,which:which]|>cpu
-    plot(y, label="real")
-    plot!(convin(x)|>cpu, label="conv")
-end
-
-
-
-
 # Let's build the Lν = f model
 # Define the model
 L = Chain(Dense(mp.layers[end], mp.layers[end]; bias=false))|>gpu
 
-νs = μAE.layers.encoder.(μs|>gpu)
-βs = B_DNN.layers[1:2](inputs|>gpu)
-#rhsloader
-#μsloader
+νs = μAE.layers.encoder.(μs)
+βs = B_DNN[1:2](inputs)
 
 latentdata = DataLoader((νs=hcat(νs...), βs=βs, μs = hcat(μs...).|>Float32,
-             Bs =inputs.|>Float32), batchsize= mp.batchsize, shuffle=true)
+             Bs =inputs.|>Float32), batchsize=mp.batchsize, shuffle=true)
 
 Lopts = Flux.setup(Adam(mp.η), L)
 
@@ -248,10 +271,10 @@ Lopts = Flux.setup(Adam(mp.η), L)
 losses = []
 @time for epoch = 1:1_000
     for (ν, f, μ, B) in latentdata
-        ν = ν |> gpu
-        f = f |> gpu
-        μ = μ |> gpu
-        B = B |> gpu
+        ν = ν 
+        f = f 
+        μ = μ 
+        B = B 
         ls = 0.0
         grads = Flux.gradient(L) do m
             # Evaluate model and loss inside gradient context:            
@@ -271,7 +294,7 @@ losses = []
             end
             e2 /= nbatch
 
-            e3 = errorL2(B_DNN.layers[3:4](Lν), B) 
+            e3 = errorL2(B_DNN[3:4](Lν), B) 
             # solve for \nu in L\nu = \beta
             Gb = m[1].weight\ν
             e4 = errorL2(μAE.layers.decoder((Gb)), μ)
@@ -358,3 +381,14 @@ x = real.(eigenvalue)
 y = imag.(eigenvalue)
 z = norm.(eigenvector) 
 scatter(x,y,marker_z=z, markercolors=:blues)
+
+
+function test_hooks(hook)
+   val1 = [1,2,3] 
+   val2 = [4,5,6]
+   val3 = [7,8,9]
+   eval(hook)
+end
+
+test_hooks(:val3)
+eval(:val2)
