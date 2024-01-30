@@ -56,7 +56,7 @@ end
 
 
 
-begin
+@time begin
     num_foils = 2
     # starting_positions = [2.0 1.0 1.0 0.0; 0.0 1.0 -1.0 0.0]
     starting_positions = [0.0 1.5 ; 0.0 0.0 ]
@@ -66,7 +66,7 @@ begin
     motion_parameters = [h0 θ0 ; -h0 θ0]
 
     foils, flow = create_foils(num_foils, starting_positions, :make_heave_pitch;
-             motion_parameters=motion_parameters, ψ=phases, Ncycles = 5, Nt = 64, kine=[:make_heave_pitch, :make_heave_pitch]);
+             motion_parameters=motion_parameters, ψ=phases, Ncycles = 15, Nt = 64, kine=[:make_heave_pitch, :make_heave_pitch]);
     wake = Wake(foils)
     @show [foil.f for foil in foils]
     (foils)(flow)
@@ -78,13 +78,13 @@ begin
     coeffs = zeros(length(foils), 4, steps)
     coeffs[:,:,1] = time_increment!(flow, foils, wake, old_mus, old_phis)
 
-    movie = @animate for t in 2:steps
+    for t in 2:steps
         coeffs[:,:,t] = time_increment!(flow, foils, wake, old_mus, old_phis; mask=[false, true])    
         xlims = foils[2].foil[1,1] .+ (-0.25, 0.25)
         ylims = foils[2].foil[2,1] .+ (-0.5, 0.25)
-        plot(foils, wake)#; xlims=xlims, ylims=ylims)
+        # plot(foils, wake)#; xlims=xlims, ylims=ylims)
     end
-    gif(movie, "newMulti.gif", fps = 30)
+    # gif(movie, "newMulti.gif", fps = 30)
 end
 
 begin
