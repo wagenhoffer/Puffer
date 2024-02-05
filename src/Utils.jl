@@ -24,9 +24,6 @@ defaultDict = Dict(:T => Float64,
     :pivot => 0.0,
     :thick => 0.12)
 
-"""
-Plotting Recipes
-"""
 
 @recipe function f(foil::Foil)
     aspect_ratio := true
@@ -46,6 +43,7 @@ end
 
 @recipe function f(foil::Foil, wake::Wake)
     # max_val = maximum(abs, wake.Γ)
+    
     max_val = std(wake.Γ) / 2.0
     aspect_ratio := true
     @series begin
@@ -67,9 +65,13 @@ end
 
 @recipe function f(foils::Vector{Foil{T}}, wake::Wake) where {T}        
     aspect_ratio := true
+    xs = vcat([f.foil[1,:] for f in foils]..., wake.xy[1,:])
+    dx =  maximum(xs) - minimum(xs)
     for foil in foils
         @series begin
             seriestype := :path
+            color := :black
+            fill := true
             label := ""
             (foil.col[1, :], foil.col[2, :])
         end
@@ -77,7 +79,7 @@ end
     max_val = std(wake.Γ) / 2.0
     @series begin 
         seriestype := :scatter
-        markersize := 3
+        markersize := 2.5
         msw := 0
         marker_z := -wake.Γ
         color := cgrad(:coolwarm)
@@ -226,59 +228,48 @@ function spalarts_prune!(wake::Wake, flow::FlowParams, foil::Foil; keep = 0)
     nothing
 end
 
-"""
-create_foils(num_foils, starting_positions, kine; kwargs...)
+function spalarts_prune!(wake::Wake, flow::FlowParams, foils::Vector{Foil{T}}; te = [0,0] ,keep = 0) where T
+    # magic numbers from Spalart paper
+    V0 = 10e-4 * flow.Uinf
+    D0 = 0.1 * foils[1].chord
+    # te = sum(hcat([foil.foil[:, 1] for foil in foils]...),dims=2)./size(foils,1)
+    ds = sqrt.(sum(abs2, wake.xy .- te, dims = 1))
+    zs = sqrt.(sum(wake.xy .^ 2, dims = 1))
 
-Create multiple foils with specified starting positions and kinematics.
+    mask = abs.(wake.Γ * wake.Γ') .* abs.(zs .- zs') ./
+           (abs.(wake.Γ .+ wake.Γ') .* (D0 .+ ds) .^ 1.5 .* (D0 .+ ds') .^ 1.5) .< V0
 
-# Arguments
-- `num_foils`: Number of foils to create.
-- `starting_positions`: Matrix of starting positions for each foil.
-- `kine`: Kinematics for the foils.
-- `kwargs`: Additional keyword arguments.
-
-# Returns
-- `foils`: Array of created foils.
-- `flow`: Flow value.
-
-# Example
-An example of usage can be found in multipleSwimmers.jl
-"""
-function create_foils(num_foils, starting_positions, kine; kwargs...) 
-    pos = deepcopy(defaultDict)       
-    pos[:kine] = kine
-    foils = Vector{Foil{pos[:T]}}(undef, num_foils)
-    flow = 0
-    for i in 1:num_foils
-        for (k,v) in kwargs
-            if size(v,1) == 1
-                pos[k] = v
-            else
-                v = v[i,:]
-                if size(v,1) == 1
-                    pos[k] = v[1]
+    k = 4
+    num_vorts = length(wake.Γ)
+    N = sum([f.N for f in foils])
+    # the k here in what to keep
+    # to save the last half of a cycle of motion keep = flow.N ÷ 2    
+    while k < num_vorts - keep
+        j = k + 1
+        while j < N + 1
+            if mask[k, j]
+                # only aggregate vortices of similar rotation
+                if sign(wake.Γ[k]) == sign(wake.Γ[j])
+                    wake.xy[:, j] = (abs(wake.Γ[j]) .* wake.xy[:, j] +
+                                     abs(wake.Γ[k]) .* wake.xy[:, k]) ./
+                                    (abs(wake.Γ[j] + wake.Γ[k]))
+                    wake.Γ[j] += wake.Γ[k]
+                    wake.xy[:, k] = [0.0, 0.0]
+                    wake.Γ[k] = 0.0
+                    mask[k, :] .= 0
                 else
-                    pos[k] = v
+                    k += 1
                 end
             end
-        end   
-        # @show pos     
-        foil, flow = init_params(; pos...)              
-        foil.foil[1, :] .+= starting_positions[1, i] * foil.chord
-        foil.foil[2, :] .+= starting_positions[2, i]
-        foil.LE = [minimum(foil.foil[1, :]), foil.foil[2, (foil.N ÷ 2 + 1)]]
-        norms!(foil)
-        set_collocation!(foil)
-        move_edge!(foil, flow;startup=true)
-        foil.edge[1, end] = 2.0 * foil.edge[1, 2] - foil.edge[1, 1]
-        foils[i] =  foil
+            j += 1
+        end
+        k += 1
     end
-    foils, flow
-end
 
-function school_of_four(height, width, chord)
-    # Define the coordinates of the swimmers in the rhombus 
-    xs = [0, width/2, width, width/2] .- chord/2.0
-    ys = [height/2, 0, height/2, height]
-    [xs ys]'
+    # clean up the wake struct
+    keepers = findall(x -> x != 0.0, wake.Γ)
+    wake.Γ = wake.Γ[keepers]
+    wake.xy = wake.xy[:, keepers]
+    wake.uv = wake.uv[:, keepers]
+    nothing
 end

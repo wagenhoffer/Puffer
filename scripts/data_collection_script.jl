@@ -26,6 +26,7 @@ begin
     ks = LinRange{T}(0.35, 2.0, 10)
 
     allofit = Vector{DataFrame}()
+    allCoeffs = Vector{DataFrame}()
     # Nested loops to vary parameters
     waves = [:make_ang, :make_car]
 
@@ -53,7 +54,9 @@ begin
 
                 # Perform simulations and save results
                 old_mus, old_phis = zeros(3, foil.N), zeros(3, foil.N)
+                coeffs = zeros(4, flow.Ncycles * flow.N)
                 phi = zeros(foil.N)
+
                 # Lets grab this data to start
                 # [foil.col'  foil.normals' foil.tangents' foil.wake_ind_vel' foil.panel_vel' U_inf]
                 datas = DataFrame(St = T[],
@@ -70,11 +73,12 @@ begin
                     μs = T[],
                     pressure = T[],
                     RHS = T[])
-
+                
                 for i in 1:(flow.Ncycles * foil.N)
                     rhs = time_increment!(flow, foil, wake)
                     phi = get_phi(foil, wake)
                     p = panel_pressure(foil, flow, old_mus, old_phis, phi)
+                    coeffs[:,i] = get_performance(foil, flow, p)
                     old_mus = [foil.μs'; old_mus[1:2, :]]
                     old_phis = [phi'; old_phis[1:2, :]]
 
@@ -112,12 +116,15 @@ begin
                 end
 
                 push!(allofit, datas)
+                push!(allCoeffs, DataFrame(wave = [wave], reduced_freq = [reduced_freq], k = [k], coeffs = [coeffs]))
             end
         end  
     end  
     # path = joinpath("data", "starter_data.jls")
     path = joinpath("data", "single_swimmer_ks_$(ks[1])_$(ks[end])_fs_$(reduced_freq_values[1])_$(reduced_freq_values[end])_ang_car.jls")
     allofit = vcat(allofit...)
+    path = joinpath("data", "single_swimmer_coeffs_ks_$(ks[1])_$(ks[end])_fs_$(reduced_freq_values[1])_$(reduced_freq_values[end])_ang_car.jls")
+    allCoeffs = vcat(allCoeffs...)
     serialize(path, allofit)
 end
 
