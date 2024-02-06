@@ -36,8 +36,8 @@ begin
                 # Set motion parameters
                 ang = deepcopy(defaultDict)
                 ang[:N] = 64
-                ang[:Nt] = 64
-                ang[:Ncycles] = 5 # number of cycles
+                ang[:Nt] = 50
+                ang[:Ncycles] = 6 # number of cycles
                 ang[:Uinf] = 1.0
                 ang[:f] = reduced_freq * ang[:Uinf]
                 ang[:kine] = wave
@@ -74,7 +74,7 @@ begin
                     pressure = T[],
                     RHS = T[])
                 
-                for i in 1:(flow.Ncycles * foil.N)
+                for i in 1:flow.Ncycles * flow.N                    
                     rhs = time_increment!(flow, foil, wake)
                     phi = get_phi(foil, wake)
                     p = panel_pressure(foil, flow, old_mus, old_phis, phi)
@@ -82,7 +82,7 @@ begin
                     old_mus = [foil.μs'; old_mus[1:2, :]]
                     old_phis = [phi'; old_phis[1:2, :]]
 
-                    if i == 1
+                    if i == N #skip first cycle
                         datas = DataFrame(reduced_freq = [reduced_freq],
                             k = [k],
                             U_inf = [flow.Uinf],
@@ -97,7 +97,7 @@ begin
                             pressure = [p], 
                             RHS = [rhs])
 
-                    else
+                    elseif i > N
                         append!(datas,
                             DataFrame(reduced_freq = [reduced_freq],
                                 k = [k],
@@ -116,16 +116,17 @@ begin
                 end
 
                 push!(allofit, datas)
-                push!(allCoeffs, DataFrame(wave = [wave], reduced_freq = [reduced_freq], k = [k], coeffs = [coeffs]))
+                push!(allCoeffs, DataFrame(wave = [wave], reduced_freq = [reduced_freq], k = [k], coeffs = [coeffs[:,N:end]]))
             end
         end  
     end  
     # path = joinpath("data", "starter_data.jls")
     path = joinpath("data", "single_swimmer_ks_$(ks[1])_$(ks[end])_fs_$(reduced_freq_values[1])_$(reduced_freq_values[end])_ang_car.jls")
     allofit = vcat(allofit...)
+    serialize(path, allofit)
     path = joinpath("data", "single_swimmer_coeffs_ks_$(ks[1])_$(ks[end])_fs_$(reduced_freq_values[1])_$(reduced_freq_values[end])_ang_car.jls")
     allCoeffs = vcat(allCoeffs...)
-    serialize(path, allofit)
+    serialize(path, allCoeffs)
 end
 
  begin

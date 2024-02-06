@@ -27,8 +27,9 @@ function build_ae_layers(layer_sizes, activation = tanh)
     Chain(encoder = encoder, decoder = decoder)
 end
 
-mp = ModelParams([64,32,16,8], 0.01, 1_000, 2048, errorL2, gpu)
+mp = ModelParams([64,32,16,8], 0.01, 1_000, 2048, errorL2, cpu)
 
+# load/ prep  training data
 data = deserialize(joinpath("data", "single_swimmer_ks_0.35_2.0_fs_0.25_4.0_ang_car.jls"))
 coeffs = deserialize(joinpath("data", "single_swimmer_coeffs_ks_0.35_2.0_fs_0.25_4.0_ang_car.jls"))
 RHS = data[:, :RHS]
@@ -53,8 +54,17 @@ for (i,row) in enumerate(eachrow(data))
     inputs[:,:,:,i] = x_in
 end
 
-W, H, C, Samples = size(inputs)
-N 
+# unroll the coeffs into the same order  as the inputs
+#force, lift, thrust, power 
+perfs = zeros(4, size(data,1))
+ns = coeffs[1,:coeffs]|>size|>last
+for (i,r) in enumerate(eachrow(coeffs))
+    perf =  r.reduced_freq < 1 ? r.coeffs : r.coeffs ./ (r.reduced_freq^2)
+    perfs[:,ns*(i-1)+1:ns*i] = perf
+end
+# end training data load
+
+#begin build models
 # this is for 2d channels
 # conv arch - layer reasoning
 # 1. mimicry of FFT convolutions
@@ -63,6 +73,7 @@ N
 # 4. reshape for testing 
 # 5. dense layer account for missing physics/data
 # Wrap it all in a ResNet; mess with this in the future for better scaling
+W, H, C, Samples = size(inputs)
 convenc = Chain(Conv((4,2), C=>C, Flux.tanh, pad=SamePad()),                
                 Conv((5,1), C=>C, Flux.tanh),
                 Conv((1,2), C=>1, Flux.tanh), 
@@ -81,19 +92,28 @@ convdec = Chain(Dense(N=>N, Flux.tanh),
 bAE = build_ae_layers(mp.layers) |> mp.dev
 μAE = build_ae_layers(mp.layers) |> mp.dev
 convNN = SkipConnection(Chain(convenc, convdec), .+)|>mp.dev
-B_DNN = Chain(
-    convenc = convenc,
-    enc = AEb[1],
-    dec = AEb[2],
-    convdec = convdec
-) |> mp.dev
+perfNN = Chain(Dense(mp.layers[end],mp.layers[end],Flux.tanh),
+               Dense(mp.layers[end],mp.layers[end]÷2,Flux.tanh),
+                Dense(mp.layers[end]÷2,2,Flux.tanh))
 
-
-
-DNNstate     = Flux.setup(Adam(mp.η), B_DNN)
 μstate       = Flux.setup(Adam(mp.η), μAE)
 bstate       = Flux.setup(Adam(mp.η), bAE)
 convNNstate = Flux.setup(Adam(mp.η), convNN)
+perfNNstate = Flux.setup(Adam(mp.η), perfNN)
+
+
+#Slap bAE into the middle of the convNN and call it B_DNN
+B_DNN = SkipConnection(Chain(
+    convenc = convNN.layers[1],
+    enc = bAE[1],
+    dec = bAE[2],
+    convdec = convNN.layers[2]), .+) |> mp.dev
+
+L = rand(mp.layers[end],mp.layers[end])
+
+
+#no state train it as separated parts
+#end build models
 
 dataloader = DataLoader((inputs.|>Float32, hcat(RHS...).|>Float32), batchsize=mp.batchsize, shuffle=true)
 μloader    = DataLoader(hcat(μs...).|>Float32, batchsize=mp.batchsize, shuffle=true)
@@ -225,11 +245,12 @@ end
 
 # Let's build the Lν = f model
 # Define the model
-L = Chain(Dense(mp.layers[end], mp.layers[end]; bias=false))|>gpu
-
+# L = Chain(Dense(mp.layers[end], mp.layers[end]; bias=false,init=(x,y)->Symmetric(rand(x,y)|>Matrix)))|>mp.dev
+L = rand(Float32, mp.layers[end],mp.layers[end])
+# L[1].weight
 Bs = hcat(RHS...).|>Float32
 μs = hcat(μs...).|>Float32
-νs = μAE[:encoder](hcat(μs...).|>Float32|>mp.dev)
+νs = μAE[:encoder](μs|>mp.dev)
 βs = bAE[:encoder](Bs|>mp.dev)
 
 
@@ -237,9 +258,10 @@ latentdata = DataLoader((νs=νs, βs=βs, μs=μs, Bs=Bs), batchsize=mp.batchsi
 
 Lopts = Flux.setup(Adam(mp.η), L)
 
-
+coeffs
 losses = []
-@time for epoch = 1:100
+e3 = e2 = e4 = 0.0
+@time for epoch = 1:mp.epochs
     for (ν, β, μ, B) in latentdata
         ν = ν |> mp.dev
         β = β |> mp.dev
@@ -249,11 +271,12 @@ losses = []
         superβ = deepcopy(β)
         superν = deepcopy(ν)
         superLν = deepcopy(β)
-
+       
         grads = Flux.gradient(L) do m
             # Evaluate model and loss inside gradient context:            
             # @show f |> size
-            Lν = m(ν)
+            # Lν = m(ν)
+            Lν = m*ν
             
             ls = errorL2(Lν, β) 
             # superposition error            
@@ -263,40 +286,87 @@ losses = []
             # for ind = 1:mp.batchsize       
             #     superβ = β + circshift(β, (0, ind))
             #     superν = ν + circshift(ν, (0, ind))
-            #     superLν = m(superν)
+            #     superLν = m*superν
             #     e2 += errorL2(superLν, superβ)
             # end
             # e2 /= mp.batchsize 
 
             e3 = errorL2(B_DNN.layers[:dec](Lν), B) 
-            # solve for \nu in L\nu = \beta
-            Gb = m[1].weight\β
-            e4 = errorL2(μAE[:decoder]((Gb)), μ)
-            
-            ls = ls + e2 + e3 + e4 
+            # # solve for \nu in L\nu = \beta
+            # Gb = m[1].weight\β
+            Gb = m\β
+            decμ =  μAE[:decoder]((Gb))
+            e4 = errorL2(decμ, μ)
+            e2 = errorL2(decμ[1,:]-decμ[end,:] - μ[1,:] + μ[end,:], μ[1,:] - μ[end,:])
+            # @show e2, e3, e4
+            # println("ls: $ls, e3: $e3, e4: $e4")           
+            ls =  ls + e2 + e3 + e4
+ 
         end
+       
         Flux.update!(Lopts, L, grads[1])
         push!(losses, ls)  # logging, outside gradient context
     end
     if epoch % 10 == 0
         println("Epoch: $epoch, Loss: $(losses[end])")
+
     end
 end
 
-
-G = inv(L[1].weight|>cpu)
+# G = inv(L[1].weight|>cpu)
+G = inv(L|>cpu)
 begin
     which = rand(1:size(latentdata.data[1],2))
-    recon_ν = G*(B_DNN.layers[2](latentdata.data.Bs[:,which:which]|>gpu)|>cpu)
+    recon_ν = G*(B_DNN.layers[:enc](latentdata.data.Bs[:,which:which]|>mp.dev)|>cpu)
     plot(latentdata.data.νs[:,which], label="latent signal")
     a = plot!(recon_ν, label="reconstructed")
     title!("ν")
     plot(latentdata.data.μs[:,which], label="μ Truth")
-    b = plot!(μAE.layers.decoder(recon_ν|>gpu), label="μ DG ")
+    b = plot!(μAE.layers.decoder(recon_ν|>mp.dev), label="μ DG ")
     title!("μs")
     plot(a,b, size=(1200,800))
 end
 
+perfNN = Chain(Dense(mp.layers[end],mp.layers[end], Flux.tanh),                
+                Dense(mp.layers[end],2,Flux.tanh),
+                Dense(2,2, Flux.tanh))
+perfNNstate = Flux.setup(Adam(0.01), perfNN)
+# ps = hcat([perfs[p,:]./perfs[1,:] for p in 2:3]...)'
+perfloader = DataLoader((νs=νs,perfs=perfs[2:3,:] .|>Float32), batchsize=512, shuffle=true)
+begin
+    losses = []
+    for epoch = 1:mp.epochs/10
+        for (ν, perf) in perfloader        
+            ν = ν |> mp.dev
+            perf = perf |> mp.dev
+            ls = 0.0
+            grads = Flux.gradient(perfNN) do m
+                # Evaluate model and loss inside gradient context:
+                ls = errorL2(m(ν), perf) 
+            end
+            Flux.update!(perfNNstate, perfNN, grads[1])
+            push!(losses, ls)  # logging, outside gradient context
+        end
+        if epoch % 100 == 0
+            println("Epoch: $epoch, Loss: $(losses[end])")
+        end
+    end
+end
+
+begin
+    which = rand(1:199)
+    c = plot(perfloader.data.νs[:,ns*which:ns*(which+1)], st=:contourf, label="input")
+    plot!(c, colorbar=:false)
+    title!("Latent")
+    plot(perfloader.data.perfs[1,ns*which:ns*(which+1)], label="signal")
+    a = plot!(perfNN(perfloader.data.νs[:,ns*which:ns*(which+1)])[1,:], label="")
+    title!("Lift")
+    plot(perfloader.data.perfs[2,ns*which:ns*(which+1)], label="signal")
+    b = plot!(perfNN(perfloader.data.νs[:,ns*which:ns*(which+1)])[2,:], label="")
+    title!("Thrust")
+    plot(c,a,b, layout = (3,1), size = (1200,800))
+    
+end
 
 begin
     # save all of the weights in Serialization
