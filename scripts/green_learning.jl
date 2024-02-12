@@ -27,7 +27,7 @@ function build_ae_layers(layer_sizes, activation = tanh)
     Chain(encoder = encoder, decoder = decoder)
 end
 
-mp = ModelParams([64,64, 32], 0.01, 1_000, 2048, errorL2, gpu)
+mp = ModelParams([64, 64, 32], 0.01, 1_000, 2048, errorL2, gpu)
 
 # load/ prep  training data
 data = deserialize(joinpath("data", "single_swimmer_ks_0.35_2.0_fs_0.25_4.0_ang_car.jls"))
@@ -180,7 +180,7 @@ end
 # Train the solution AE - forcing b
 begin
     blosses = []
-    for epoch = 1:50
+    for epoch = 1:mp.epochs
         for (x, y) in dataloader        
             y = y |> mp.dev
             ls = 0.0
@@ -360,14 +360,14 @@ end
 
 begin
     which = rand(1:199)
-    c = plot(perfloader.data.νs[:,ns*which:ns*(which+1)], st=:contour, label="input")
+    c = plot(perfloader.data.νs[:,ns*which+1:ns*(which+1)], st=:contour, label="input")
     plot!(c, colorbar=:false)
     title!("Latent")
-    plot(perfloader.data.perfs[1,ns*which:ns*(which+1)], label="signal")
-    a = plot!(perfNN(perfloader.data.νs[:,ns*which:ns*(which+1)])[1,:], label="")
+    plot(perfloader.data.perfs[1,ns*which+1:ns*(which+1)], label="signal")
+    a = plot!(perfNN(perfloader.data.νs[:,ns*which+1:ns*(which+1)])[1,:], label="")
     title!("Lift")
-    plot(perfloader.data.perfs[2,ns*which:ns*(which+1)], label="signal")
-    b = plot!(perfNN(perfloader.data.νs[:,ns*which:ns*(which+1)])[2,:], label="")
+    plot(perfloader.data.perfs[2,ns*which+1:ns*(which+1)], label="signal")
+    b = plot!(perfNN(perfloader.data.νs[:,ns*which+1:ns*(which+1)])[2,:], label="")
     title!("Thrust")
     plot(c,a,b, layout = (3,1), size = (1200,800))
     
@@ -422,20 +422,47 @@ begin
     eigenvalue,eigenvector = eigen(G)
     ix = sortperm(abs.(eigenvalue), rev=true)
     scatter(eigenvalue, marker_z = abs.(eigenvalue), 
-    ms=abs.(eigenvalue),
+    ms=abs.(eigenvalue.*4),
     markercolor = :coolwarm, legend=false, cbar=true)    
 end
 
 
 begin
-    
-    xdot = rand(Float32, (mp.layers[end],1))
+    n = 4  # Number of top eigenvalue/eigenvector pairs to plot
+    xdot = νs[:,1]|>cpu
     anim = Animation()
-    for i in range(1, stop=10)
-        xdot =  G*xdot    
-        f = plot(xdot, st=:scatter,label="")
+
+    # Compute eigenvalues and eigenvectors
+    eigenvalues, eigenvectors = eigen(G)
+
+    # Sort eigenvalues and corresponding eigenvectors in descending order
+    idx = sortperm(abs.(eigenvalues), rev=true)
+    eigenvalues = eigenvalues[idx]
+    eigenvectors = eigenvectors[:, idx]
+
+    # Select top n eigenvalue/eigenvector pairs
+    λ = eigenvalues[1:n]
+    vs = eigenvectors[:, 1:n]
+    
+
+    for t in LinRange(0,2π,100)
+        # Update xdot using top n eigenvectors
+        
+        xdot = vs*exp(Diagonal(λ).*t)*vs'* xdot
+
+        # Plot phase space
+        f = plot(xdot, label = "", lw=2, marker=:circle)
         frame(anim, f)
     end
-    gif(anim, "evo.gif", fps = 10)
 
+    gif(anim, "evo.gif", fps = 10)
+end
+
+begin
+    ts = 0:0.1:8π
+    movie = @animate for t in ts
+        dl = [exp.(l.*ts./2π) for l in λ]
+        plot(real(dl[1]), imag(dl[1]), label = "", lw=2,st=:scatter,  marker=:circle)
+    end
+    gif(movie, "evo.gif", fps = 10)
 end
