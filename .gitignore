@@ -3,11 +3,14 @@
 images/*.gif
 # Portable Network Graphics
 *.png
+*.svg
 #CSV files for data storage
 *.csv
-/data/*.csv
+data/*.csv
 *.jls
-/data/*.jls
+data/*.jls
+*.jld2
+data/*.jld2
 #coverage files
 *.cov
 *.info
