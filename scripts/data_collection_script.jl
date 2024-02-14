@@ -36,7 +36,7 @@ begin
                 # Set motion parameters
                 ang = deepcopy(defaultDict)
                 ang[:N] = 64
-                ang[:Nt] = 50
+                ang[:Nt] = 100
                 ang[:Ncycles] = 6 # number of cycles
                 ang[:Uinf] = 1.0
                 ang[:f] = reduced_freq * ang[:Uinf]
