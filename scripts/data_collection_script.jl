@@ -82,7 +82,7 @@ begin
                     old_mus = [foil.μs'; old_mus[1:2, :]]
                     old_phis = [phi'; old_phis[1:2, :]]
 
-                    if i == N #skip first cycle
+                    if i == ang[:Nt] #skip first cycle
                         datas = DataFrame(reduced_freq = [reduced_freq],
                             k = [k],
                             U_inf = [flow.Uinf],
@@ -97,7 +97,7 @@ begin
                             pressure = [p], 
                             RHS = [rhs])
 
-                    elseif i > N
+                    elseif i > ang[:Nt] 
                         append!(datas,
                             DataFrame(reduced_freq = [reduced_freq],
                                 k = [k],
@@ -116,7 +116,7 @@ begin
                 end
 
                 push!(allofit, datas)
-                push!(allCoeffs, DataFrame(wave = [wave], reduced_freq = [reduced_freq], k = [k], coeffs = [coeffs[:,N:end]]))
+                push!(allCoeffs, DataFrame(wave = [wave], reduced_freq = [reduced_freq], k = [k], coeffs = [coeffs[:,ang[:Nt]:end]]))
             end
         end  
     end  
