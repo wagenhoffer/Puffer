@@ -85,18 +85,35 @@ end
 
 mp = ModelParams([64, 64, 32], 0.01, 1_000, 2048, errorL2, gpu)
 
+
+
+    # >> make new function prep_data() 
+
+    # args: data, coeffs
+
+    # returns μ, and RHS 
 # load/ prep  training data
 data = deserialize(joinpath("data", "single_swimmer_ks_0.35_2.0_fs_0.25_4.0_ang_car.jls"))
 coeffs = deserialize(joinpath("data", "single_swimmer_coeffs_ks_0.35_2.0_fs_0.25_4.0_ang_car.jls"))
 RHS = hcat(data[:, :RHS]...).|>Float32
 μs = hcat(data[:, :μs]...).|>Float32
+    # >> end 
+
+
 
 N = mp.layers[1]
 σs = nothing
 pad = 2
-inputs = zeros(N + pad*2, 2, 4, size(data,1))
+inputs = zeros(N + pad*2, 2, 4, size(data,1)) # array of zeros? 
 freqs = data[:, :reduced_freq]
 ks    = data[:,:k]
+
+
+    # >> make new function prep_input_array() 
+
+    # parameters: deserialized data 
+
+    # returns: ? 
 for (i,row) in enumerate(eachrow(data))       
     U_inf = ones(N).*row.U_inf
     freaks = ones(N).*row.reduced_freq
@@ -109,6 +126,9 @@ for (i,row) in enumerate(eachrow(data))
     x_in = reshape(x_in, size(x_in,1), 2, size(x_in, 2) ÷ 2, 1) #shape the data to look like channels
     inputs[:,:,:,i] = x_in
 end
+    # end 
+
+
 
 # unroll the coeffs into the same order  as the inputs
 #force, lift, thrust, power 
@@ -119,6 +139,10 @@ for (i,r) in enumerate(eachrow(coeffs))
     perfs[:,ns*(i-1)+1:ns*i] = perf
 end
 # end training data load
+
+
+
+    # >> make new function 
 
 #begin build models
 # this is for 2d channels
@@ -156,6 +180,8 @@ perfNN = Chain(Dense(mp.layers[end],mp.layers[end],Flux.tanh),
 bstate       = Flux.setup(Adam(mp.η), bAE)
 convNNstate = Flux.setup(Adam(mp.η), convNN)
 perfNNstate = Flux.setup(Adam(mp.η), perfNN)
+
+    # end
 
 
 #Slap bAE into the middle of the convNN and call it B_DNN
