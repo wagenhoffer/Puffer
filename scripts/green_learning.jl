@@ -61,7 +61,11 @@ and passes this whole thing through an activation function.
 Dense layers are **fully connected** I'm pretty sure. 
 
 **`decoder`** 
-the decoder is a chain of dense layers. layer_sizes is an array containing the size of each layer at the i-th index with larger layer sizes at the beginning. Since the Decoder takes inputs from the hidden layer (of a smaller dimension) and blows them up to the original dimension, we start from the end of layer_sizes for input and connect the layer to the next largest dimensioned layer. the decoder effectively reverses the dimensionality reduction done by the encoder
+the decoder is a chain of dense layers. 
+layer_sizes is an array containing the size of each layer at the i-th index with larger layer sizes at the beginning. 
+Since the Decoder takes inputs from the hidden layer (of a smaller dimension) and blows them up to the original dimension, 
+we start from the end of layer_sizes for input and connect the layer to the next largest dimensioned layer. 
+The decoder effectively reverses the dimensionality reduction done by the encoder
 
 **`encoder`** 
 just like the decoder, this is a chain of dense layers. 
