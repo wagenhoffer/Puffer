@@ -29,7 +29,7 @@ begin
     allCoeffs = Vector{DataFrame}()
     # Nested loops to vary parameters
     waves = [:make_ang, :make_car]
-
+    crescentlakesuites@gmail.com
     for wave in waves
         for reduced_freq in reduced_freq_values
             for k in ks
@@ -251,8 +251,8 @@ begin
                     motion_parameters = [a0 for i in 1:num_foils]
                 
                     foils, flow = create_foils(num_foils, starting_positions, :make_wave;
-                            motion_parameters=motion_parameters, ψ=phases, Ncycles = 5,
-                            k= ks,  Nt = 64, f = fs);
+                            motion_parameters=motion_parameters, ψ=phases, Ncycles = 6,
+                            k= ks,  Nt = 100, f = fs);
                     
                     wake = Wake(foils)
                     
@@ -282,13 +282,13 @@ begin
                                             tangents     = [vcat([foil.tangents for foil in foils]...)],
                                             μs           = [vcat([foil.μs for foil in foils]...)]
                                             )        
-                        if i == 1
+                        if i == flow.N
                             datas = values
-                        else
+                        elseif i > flow.N
                             append!(datas, values)
                         end
                     end
-                    coeff_df = DataFrame(δ = [δ], reduced_freq = [reduced_freq], k = [k], ψ=[ψi], coeffs = [coeffs])
+                    coeff_df = DataFrame(δ = [δ], reduced_freq = [reduced_freq], k = [k], ψ=[ψi], coeffs = [coeffs[:,:,flow.N:end]])
                                     
                     push!(allCoeffs, coeff_df)
                     push!(allofit, datas)

@@ -220,7 +220,7 @@ function next_foil_pos(foil::Foil, flow::FlowParams)
         pos .+= hframe        
     else
         pos = ([foil._foil[1, :] .- foil.pivot foil._foil[2, :] .+
-        foil.kine.(foil._foil[1, :],foil.f,foil.k,flow.n * flow.Δt)]
+        foil.kine.(foil._foil[1, :],foil.f,foil.k,flow.n * flow.Δt,foil.ψ)]
          * rotation(-foil.θ))'
     end
     pos .+= LE
@@ -245,4 +245,57 @@ function rotate_about(foil, θ)
     pos = ([foil._foil[1, :] .- foil.pivot foil._foil[2, :]] * rotation(θ))'
     pos[1, :] .+= foil.pivot
     pos
+end
+
+
+"""
+create_foils(num_foils, starting_positions, kine; kwargs...)
+
+Create multiple foils with specified starting positions and kinematics.
+
+# Arguments
+- `num_foils`: Number of foils to create.
+- `starting_positions`: Matrix of starting positions for each foil.
+- `kine`: Kinematics for the foils.
+- `kwargs`: Additional keyword arguments.
+
+# Returns
+- `foils`: Array of created foils.
+- `flow`: Flow value.
+
+# Example
+An example of usage can be found in multipleSwimmers.jl
+"""
+function create_foils(num_foils, starting_positions, kine; kwargs...) 
+    pos = deepcopy(defaultDict)       
+    pos[:kine] = kine
+    foils = Vector{Foil{pos[:T]}}(undef, num_foils)
+    flow = 0
+    for i in 1:num_foils
+
+        for (k,v) in kwargs
+            if size(v,1) == 1
+                pos[k] = v
+            else
+                v = v[i,:]
+                if size(v,1) == 1
+                    pos[k] = v[1]
+                else
+                    pos[k] = v
+                end
+            end
+        end   
+        # @show pos     
+        foil, flow = init_params(; pos...)      
+        @show flow          
+        foil.foil[1, :] .+= starting_positions[1, i] * foil.chord
+        foil.foil[2, :] .+= starting_positions[2, i]
+        foil.LE = [minimum(foil.foil[1, :]), foil.foil[2, (foil.N ÷ 2 + 1)]]
+        norms!(foil)
+        set_collocation!(foil)
+        move_edge!(foil, flow;startup=true)
+        foil.edge[1, end] = 2.0 * foil.edge[1, 2] - foil.edge[1, 1]
+        foils[i] =  foil
+    end
+    foils, flow
 end
