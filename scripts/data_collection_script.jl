@@ -173,9 +173,32 @@ end
                 
                 old_mus, old_phis = zeros(3, totalN), zeros(3, totalN)
                 coeffs = zeros(length(foils), 4, steps)
-                                               
+                μs = zeros(totalN)
+                phis = zeros(totalN)
+                ps = zeros(totalN)
+                    
+                
                 @time for i in 1:steps
-                    coeffs[:,:,1] = time_increment!(flow, foils, wake, old_mus, old_phis)
+                    rhs = time_increment!(flow, foils, wake, old_mus, old_phis)
+
+                
+                    
+                    for (j, foil) in enumerate(foils)        
+                        phi = get_phi(foil, wake)
+                        phis[((j - 1) * foil.N + 1):(j * foil.N)] = phi
+                        p = panel_pressure(foil,
+                            flow,
+                            old_mus[:, ((j - 1) * foil.N + 1):(j * foil.N)],
+                            old_phis[:,((j - 1) * foil.N + 1):(j * foil.N)],
+                            phi)
+                        ps[((j - 1) * foil.N + 1):(j * foil.N)] = p
+                        μs[((j - 1) * foil.N + 1):(j * foil.N)] = foil.μs
+                        coeffs[j, :, i ] .= get_performance(foil, flow, p)
+                    end
+                    old_mus = [μs'; old_mus[1:2, :]]
+                    old_phis = [phis'; old_phis[1:2, :]]
+                    
+                    
                     vals = DataFrame( δ = [δ],
                                         reduced_freq = [reduced_freq],
                                         k            = [k],
@@ -187,11 +210,13 @@ end
                                         normals      = [vcat([foil.normals for foil in foils]...)],
                                         wake_ind_vel = [vcat([foil.wake_ind_vel for foil in foils]...)],
                                         tangents     = [vcat([foil.tangents for foil in foils]...)],
-                                        μs           = [vcat([foil.μs for foil in foils]...)]
+                                        μs           = [vcat([foil.μs for foil in foils]...)],
+                                        pressure     = [ps],
+                                        RHS          = [rhs]                        
                                         )        
-                    if i == 1
+                    if i == flow.N
                         datas = vals
-                    else
+                    elseif i > flow.N
                         append!(datas, vals)
                     end
 
@@ -200,7 +225,7 @@ end
                 # file = "d_$(@sprintf("%.2f", δ))_f_$(reduced_freq)_k_$(k).gif"
                 # path = joinpath("images","gfx_images", file)
                 # gif(movie, path, fps = 30)
-                coeff_df = DataFrame(δ = [δ], reduced_freq = [reduced_freq], k = [k], coeffs = [coeffs])
+                coeff_df = DataFrame(δ = [δ], reduced_freq = [reduced_freq], k = [k], coeffs = [coeffs[:,:,flow.N:end]])
                                 
                 push!(allCoeffs, coeff_df)
                 push!(allofit, datas)

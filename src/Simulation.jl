@@ -184,32 +184,15 @@ function time_increment!(flow::FlowParams{T}, foils::Vector{Foil{T}}, wake::Wake
         σs[((i - 1) * foil.N + 1):(i * foil.N)] = foil.σs
         buff += (edge_body[:, i] * foil.μ_edge[1])
     end
-    μs = A \ (-rhs * σs - buff)
+    rhs = (-rhs * σs - buff)
+    μs = A \ rhs
     for (i, foil) in enumerate(foils)
         foil.μs = μs[((i - 1) * foil.N + 1):(i * foil.N)]
     end
     set_edge_strength!.(foils)    
     [body_to_wake!(wake, foil, flow) for foil in foils]
     wake_self_vel!(wake, flow)
-    
-    phis = zeros(totalN)
-    ps = zeros(totalN)
-
-    perf = zeros(length(foils), 4)
-    for (i, foil) in enumerate(foils)        
-        phi = get_phi(foil, wake)
-        phis[((i - 1) * foils[i].N + 1):(i * foils[i].N)] = phi
-        p = panel_pressure(foil,
-            flow,
-            old_mus[:, ((i - 1) * foils[i].N + 1):(i * foils[i].N)],
-            old_phis[:, ((i - 1) * foils[i].N + 1):(i * foils[i].N)],
-            phi)
-        ps[((i - 1) * foils[i].N + 1):(i * foils[i].N)] = p
-        perf[i, :] .= get_performance(foil, flow, p)
-    end
-    old_mus = [μs'; old_mus[1:2, :]]
-    old_phis = [phis'; old_phis[1:2, :]]
-    perf
+    rhs
 end
 
 function get_phi(foil::Foil, wake::Wake)

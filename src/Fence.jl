@@ -165,8 +165,8 @@ function sdf_fence(wake::Wake, foil::Foil, flow::FlowParams; dest = nothing)
     bs = ms .* dest[1, :] .- dest[2, :]
     # Check if the final position is inside the foil
     xinside = map(x -> minimum(nfoil[1,:]) <= x <= maximum(nfoil[1,:]), dest[1,:])    
-    inside = map(x-> sdf(dest[:,x]) < 0, axes(dest,2) )
-    inside = inside .&& xinside
+    inside  = map(x-> sdf(dest[:,x]) < 0, axes(dest,2) )
+    inside  = inside .&& xinside
     # Start the looping process, using a quadtree to reduce the computational load
     iters = 1
 
