@@ -8,7 +8,25 @@ using CUDA
 using Serialization, DataFrames
 using JLD2
 
+"""
+    Modelparams(layers, η, epochs, batchsize, lossfunc, dev)
 
+Holds parameters for creating and training the neural network.
+    
+# Parameters 
+- **`layers::Vector`** - a vector containing data about the layers of the neural network (how many neurons are in each layer)
+- **`η::Float64`** - eta, represents the learning rate hyperparameter (i think)
+- **epochs::Int** - determines the number of training cycles
+- **`batchsize::Int`** - represents the number of training samples used in a single training cylce. this hyperparameter controls how data is divided (batched)
+- **`lossfunc::Function`** - the function that well use to evaluate our models error 
+- **`dev`** - takes in the device that will run the model (well use the gpu usually)
+
+# Example 
+```julia
+mp = ModelParams([64, 64, 32], 0.01, 1_000, 2048, errorL2, gpu)
+
+
+"""
 struct ModelParams
     layers::Vector    
     η::Float64
@@ -20,6 +38,46 @@ end
 
 errorL2(x, y) = Flux.mse(x,y)/Flux.mse(y,0.0) 
 
+
+"""
+    build_ae_layers(layer_sizes, activation)
+
+# Arguments
+- `layer_sizes` - determines the number of neurons within each layer 
+- `activation` - activation function which outputs values between -1 and 1. (set to **tanh** by default) 
+
+# Returns
+a dense (fully connected) neural network. 
+
+# Detailed Description 
+
+**`Chain()`** - a function from Flux. 
+Its chains together multiple NN layers into a single model. 
+Chain allows us to immediately pass data through all layers of the neural network. 
+the output of one network gets sent to the next automatically 
+
+**`Dense()`** - takes in 3 parameters 
+Dense(output_dimension, input_dimension, activation_function). 
+Dense() is a single layer of neurons within our network. 
+Each Neuron in a dense layer wheights the sum of all its inputs, adds a bias, 
+and passes this whole thing through an activation function. 
+Dense layers are **fully connected** I'm pretty sure. 
+
+**`decoder`** 
+the decoder is a chain of dense layers. 
+layer_sizes is an array containing the size of each layer at the i-th index with larger layer sizes at the beginning. 
+Since the Decoder takes inputs from the hidden layer (of a smaller dimension) and blows them up to the original dimension, 
+we start from the end of layer_sizes for input and connect the layer to the next largest dimensioned layer. 
+The decoder effectively reverses the dimensionality reduction done by the encoder
+
+**`encoder`** 
+just like the decoder, this is a chain of dense layers. 
+We construct it in the opposite way of the decoder. 
+We start with the input layer (first index of layer_sizes) 
+and connect each subsequent layer to the next one with a smaller dimension. 
+This occurs until we reach the end of layer_sizes which connects to the hidden layer.  
+ 
+"""
 function build_ae_layers(layer_sizes, activation = tanh)    
     decoder = Chain([Dense(layer_sizes[i+1], layer_sizes[i], activation) 
                     for i = length(layer_sizes)-1:-1:1]...)    
@@ -29,14 +87,66 @@ function build_ae_layers(layer_sizes, activation = tanh)
 end
 
 
+"""
+    build_dataloaders(mp::ModelParams; data="swimmer_data.jls, coeffs="swimmer_coefs.jls")
 
+# Arguments
+- `mp`- supplies information about the model's structure. Here we just get the size of the input layer. 
+- `data` - the raw data that will be used to train the network (from a simulation?)
+- `coefs` - swimmer parameters that we wish to predict? (attributes like force, thurst, velocity etc.)
+
+# Detailed Description 
+This function prepares the data for processing by the model. This is done with using the following preprocessing techniques: 
+
+## Desrialization
+Raw data is extracted from a file containing the raw simulation data as well as the coefficients of swimmer data such thrust, lift, etc. 
+This is done using `deserialize()` which uses `joinpath()` to resolve the local path of the file on your system. Simulation data is loaded into `data`
+and the coefficient attributes are loaded into `coeffs`
+
+## Preprocessing (RHS and μ)
+Here we prepare the data to train the autoencoders. Both RHS and μ are first reshaped into horizontal arrays with `hcat()` 
+and then converted to type Float32. The autoencoder denoted ϕ is then fed the μ array. 
+Usually, we'll set the autoencoder hidden layers to some dimension lower than 
+that of the input layer. After the μ data has passed through the autencoder, well need to ensure that it matches the data
+in RHS, essentially validating the autoencoder. 
+
+
+## Preparing NN Input 
+
+```julia
+    N = mp.layers[1]
+    pad = 2
+```
+Here we set `N` to be the input layer. 
+pad defines the amount of zeroes which will pad our data.
+this is done to keep consistent array dims between different NNs 
+but reduce dimensionality within the array. 
+
+
+```julia
+    inputs = zeros(Float32, N + pad*2, 2, 4, size(data,1))
+```
+Here we create an (n-dimension) array of zeroes first. Since well be 
+reducing the dimensions of our data in the hidden layers of the AEs, 
+well use some zero values to pad the array to keep a consistent input 
+array size. 
+
+
+```julia
+    for (i,row) in enumerate(eachrow(data))
+        position = row.position .- minimum(row.position, dims=2)
+```
+since we are reshaping the array, we will shift the data arround in such a way to conform 
+to the new dimensions that are defined in the model (width, number of layers etc.?  
+
+"""
 function build_dataloaders(mp::ModelParams; data="single_swimmer_ks_0.35_2.0_fs_0.25_4.0_ang_car.jls", coeffs= "single_swimmer_coeffs_ks_0.35_2.0_fs_0.25_4.0_ang_car.jls")
     # load/ prep  training data
     data = deserialize(joinpath("data", data))
     coeffs = deserialize(joinpath("data", coeffs))
 
     RHS = hcat(data[:, :RHS]...).|>Float32
-    μs = hcat(data[:, :μs]...).|>Float32
+    μs = hcat(data[:, :μs]...).|>Float32 
 
     N = mp.layers[1]
     
