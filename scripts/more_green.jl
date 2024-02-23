@@ -88,7 +88,7 @@ end
 
 
 """
-    build_dataloaders(mp::ModelParams; data="swimmer_data.jls, coeffs="swimmer_coefs.jls")
+    build_dataloaders(mp::ModelParams; data, coeffs)
 
 # Arguments
 - `mp`- supplies information about the model's structure. Here we just get the size of the input layer. 
@@ -122,7 +122,7 @@ pad defines the amount of zeroes which will pad our data.
 this is done to keep consistent array dims between different NNs 
 but reduce dimensionality within the array. 
 
-
+## Creating the Empty input Array 
 ```julia
     inputs = zeros(Float32, N + pad*2, 2, 4, size(data,1))
 ```
@@ -132,12 +132,42 @@ well use some zero values to pad the array to keep a consistent input
 array size. 
 
 
+## Reshaping 
 ```julia
     for (i,row) in enumerate(eachrow(data))
         position = row.position .- minimum(row.position, dims=2)
 ```
-since we are reshaping the array, we will shift the data arround in such a way to conform 
-to the new dimensions that are defined in the model (width, number of layers etc.?  
+**Since we are reshaping the array, we will shift the data arround in such a way to conform 
+to the new dimensions that are defined in the model (width, number of layers etc.?**
+We then add the transposed vectors (denote as `position' row.normals' row.wake_ind_vel' row.panel_vel'`)
+the final shape of `x_in` should be a horizontal array? 
+
+
+## Processing Outs & Evaluating AE Performance 
+```julia
+    perfs = zeros(4, size(data,1))
+    ns = coeffs[1,:coeffs]|>size|>last
+    
+    for (i,r) in enumerate(eachrow(coeffs))
+        perf =  r.reduced_freq < 1 ? r.coeffs : r.coeffs ./ (r.reduced_freq^2)
+        perfs[:,ns*(i-1)+1:ns*i] = perf
+    end
+```
+After the autoencoder is trained, we then need to evaluate its ability
+to reconstruct the coefficient data from the piped in data after it goes 
+through the hidden layers (hidden layers have lower dimensionality). 
+`perfs` is a 2D array with 4 rows and n columns where n is the number of rows in data. 
+**All elements are initially set to 0. `ns` gets the number of elements for a particular 
+column???** of coeffs and gets its size. **Size then gets pumped to last so we
+pull the last item element of what `size()` outputs which is the number of columnsfor the 
+coefs vector? Please Explain the code in the for loop!!!!!!**
+
+## Saving the Dataloader 
+```julia
+    dataloader = DataLoader((inputs=inputs, RHS=RHS, μs=μs, perfs=perfs), batchsize=mp.batchsize, shuffle=true)    
+```
+
+
 
 """
 function build_dataloaders(mp::ModelParams; data="single_swimmer_ks_0.35_2.0_fs_0.25_4.0_ang_car.jls", coeffs= "single_swimmer_coeffs_ks_0.35_2.0_fs_0.25_4.0_ang_car.jls")
@@ -174,6 +204,14 @@ function build_dataloaders(mp::ModelParams; data="single_swimmer_ks_0.35_2.0_fs_
 end
 
 # W, H, C, Samples = size(dataloader.data.inputs)
+"""
+```julia
+    build_networks(mp; C = Layers, N = inputSize)
+```
+This function builds the autoencoders and autodecoders for the trained neural networks. 
+
+
+"""
 function build_networks(mp; C = 4, N = 64)
     convenc = Chain(Conv((4,2), C=>C, Flux.tanh, pad=SamePad()),                
                     Conv((5,1), C=>C, Flux.tanh),
