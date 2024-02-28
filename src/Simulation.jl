@@ -162,11 +162,11 @@ function time_increment!(flow::FlowParams, foil::Foil, wake::Wake)
     rhs
 end
 
-function time_increment!(flow::FlowParams{T}, foils::Vector{Foil{T}}, wake::Wake{T}, old_mus::Matrix{T}, old_phis::Matrix{T};mask=nothing) where T<:Real
+function time_increment!(flow::FlowParams{T}, foils::Vector{Foil{T}}, wake::Wake{T}; mask=nothing) where T<:Real
     totalN = sum(foil.N for foil in foils)
     
     if flow.n != 1
-        move_wake!(wake, flow,foils;mask=mask)
+        move_wake!(wake, flow,foils; mask=mask)
         
         [release_vortex!(wake, foil) for foil in foils]    
         cancel_buffer_Γ!(wake, foils)    
