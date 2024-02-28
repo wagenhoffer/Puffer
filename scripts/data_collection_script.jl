@@ -178,7 +178,7 @@ begin
                     
                 
                 @time for i in 1:steps
-                    rhs = time_increment!(flow, foils, wake, old_mus, old_phis)
+                    rhs = time_increment!(flow, foils, wake)
 
                 
                     
@@ -295,7 +295,7 @@ begin
                         
 
                     @time for i in 1:steps
-                        rhs = time_increment!(flow, foils, wake, old_mus, old_phis)
+                        rhs = time_increment!(flow, foils, wake)
 
 
                         
@@ -367,7 +367,13 @@ begin
     a0 = 0.1
     δxs = LinRange{T}(1.25, 2.0, 4)
     δys = LinRange{T}(0.5,  2.0, 4)
-    ψs = LinRange{T}(0, pi, 5)
+    ψs = LinRange{T}(0, pi/2, 3)
+  
+    reduced_freq = rand(reduced_freq_values)
+    k = rand(k_values)
+    δx = δxs[1]
+    δy = δys[1]
+    ψi = rand(ψs)
 
     num_foils = 4
 
@@ -390,7 +396,7 @@ begin
                         motion_parameters = [a0 for _ in 1:num_foils]
 
                         foils, flow = create_foils(num_foils, starting_positions, :make_wave;
-                            motion_parameters=motion_parameters, ψ=phases, Ncycles = 6,
+                            motion_parameters=motion_parameters, ψ=phases, Ncycles = 8,
                             k= ks,  Nt = 100, f = fs);
 
                             wake = Wake(foils)                    
@@ -407,8 +413,12 @@ begin
                                 
         
                             @time for i in 1:steps
-                                rhs = time_increment!(flow, foils, wake, old_mus, old_phis)
-        
+                            # (foils)(flow)
+                            # movie = @animate for i in 1:steps
+                            #     rhs = time_increment!(flow, foils, wake)
+                            #     plot(foils, wake)
+                            # end
+                            # gif(movie, "test.gif", fps = 30)
         
                                 
                                 for (j, foil) in enumerate(foils)        
@@ -427,9 +437,11 @@ begin
                                 old_phis = [phis'; old_phis[1:2, :]]
                                 
                                 
-                                vals = DataFrame( δ = [δ],
+                                vals = DataFrame(   δx = [δx],
+                                                    δy = [δy],
                                                     reduced_freq = [reduced_freq],
                                                     k            = [k],
+                                                    ψi = [ψi],
                                                     U_inf        = [flow.Uinf],
                                                     t            = [flow.n * flow.Δt],
                                                     σs           = [vcat([foil.σs for foil in foils]...)],
@@ -454,7 +466,7 @@ begin
                             # path = joinpath("images","gfx_images", file)
                             # gif(movie, path, fps = 30)
                             # coeff_df = DataFrame(δ = [δ], reduced_freq = [reduced_freq], k = [k], coeffs = [coeffs[:,:,flow.N:end]])
-                            coeff_df = DataFrame(δx = [δx], δy = [δy], reduced_freq = [reduced_freq], k = [k], ψs=phases, coeffs = [coeffs[:,:,flow.N:end]])
+                            coeff_df = DataFrame(δx = [δx], δy = [δy], reduced_freq = [reduced_freq], k = [k], ψi=[ψi], coeffs = [coeffs[:,:,flow.N:end]])
                                 
                             push!(allCoeffs, coeff_df)
                             push!(allofit, datas)
