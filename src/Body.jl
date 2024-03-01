@@ -264,7 +264,7 @@ Create multiple foils with specified starting positions and kinematics.
 - `flow`: Flow value.
 
 # Example
-An example of usage can be found in multipleSwimmers.jl
+An example of usage can be found in scripts/multipleSwimmers.jl
 """
 function create_foils(num_foils, starting_positions, kine; kwargs...) 
     pos = deepcopy(defaultDict)       
@@ -287,7 +287,7 @@ function create_foils(num_foils, starting_positions, kine; kwargs...)
         end   
         # @show pos     
         foil, flow = init_params(; pos...)      
-        @show flow          
+          
         foil.foil[1, :] .+= starting_positions[1, i] * foil.chord
         foil.foil[2, :] .+= starting_positions[2, i]
         foil.LE = [minimum(foil.foil[1, :]), foil.foil[2, (foil.N ÷ 2 + 1)]]

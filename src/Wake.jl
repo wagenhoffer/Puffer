@@ -1,4 +1,4 @@
-
+using CUDA
 mutable struct Wake{T}
     xy::Matrix{T}
     Γ::Vector{T}
@@ -75,7 +75,15 @@ function body_to_wake!(wake::Wake, foil::Foil, flow::FlowParams)
     wake.uv .+= vortex_to_target(ps, wake.xy, Γs, flow)
     nothing
 end
-function vortex_to_target(sources::Matrix{T}, targets, Γs, flow) where {T <: Real}
+
+# if CUDA.functional()
+#     vortex_to_target(sources, targets, Γs, flow) where {T <: Real} = cast_and_pull(sources, targets, Γs,flow)
+# else?
+vortex_to_target(sources, targets, Γs, flow) where {T <: Real} = cpu_vortex_to_target(sources, targets, Γs, flow)
+# end
+
+
+function cpu_vortex_to_target(sources::Matrix{T}, targets, Γs, flow) where {T <: Real}
     ns = size(sources)[2]
     nt = size(targets)[2]
     vels = zeros(T, (2, nt))
@@ -90,32 +98,26 @@ function vortex_to_target(sources::Matrix{T}, targets, Γs, flow) where {T <: Re
     vels
 end
 
-# vortex_to_target(wake::Wake,flow) = vortex_to_target(wake.xy, wake.xy, wake.Γ, flow)
-# @inbounds @views macro dx(s,t) esc(:( ($t[1 ,:] .- $s[1,:]') )) end
-# @inbounds @views macro dy(s,t) esc(:( ($t[2 ,:] .- $s[2,:]') )) end
-# function cast_and_pull(sources, targets, Γs)
-#     @inbounds @views function vt!(vel,S,T,Γs,δ)
-#         n = size(S,2)
-#         mat = CUDA.zeros(Float32, n,n)    
-#         dx = @dx(S,T)
-#         dy = @dy(S,T)
-#         @. mat = Γs /(2π * sqrt((dx.^2 .+ dy.^2 )^2 + δ^4))
-#         @views vel[1,:] = -sum(dy .* mat, dims = 1)
-#         @views vel[2,:] =  sum(dx .* mat, dims = 1)
-#         return nothing
-#     end
-#     vel = CUDA.zeros(Float32, size(targets)...)
-#     vt!(vel, sources, targets, Γs, flow.δ)
-#     vel|>Array    
-# end
+vortex_to_target(wake::Wake,flow) = vortex_to_target(wake.xy, wake.xy, wake.Γ, flow)
+@inbounds @views macro dx(s,t) esc(:( ($t[1 ,:] .- $s[1,:]') )) end
+@inbounds @views macro dy(s,t) esc(:( ($t[2 ,:] .- $s[2,:]') )) end
 
-# function vortex_to_target(sources::Matrix{T}, targets, Γs, flow) where {T <: Real}
-#     if CUDA.functional()
-#         cast_and_pull(vel, sources, targets, Γs)
-#     else
-#         vortex_to_target(sources, targets, Γs, flow)
-#     end
-# end
+function cast_and_pull(sources, targets, Γs,flow)    
+    @inbounds @views function vt!(vel,S,T,Γs,δ)
+        n = size(S,2)
+        @show n
+        mat = CUDA.zeros(Float32, n,n)    
+        dx = @dx(S,T)
+        dy = @dy(S,T)
+        @. mat = Γs /(2π * sqrt((dx.^2 .+ dy.^2 )^2 + δ^4))
+        @views vel[1,:] = -sum(dy .* mat, dims = 1)
+        @views vel[2,:] =  sum(dx .* mat, dims = 1)
+        return nothing
+    end
+    vel = CUDA.zeros(Float32, size(targets)...)
+    vt!(vel, sources, targets, Γs, flow.δ)
+    vel|>Array    
+end
 
 function release_vortex!(wake::Wake, foil::Foil)
     # wake.xy = [wake.xy foil.edge[:, end]]

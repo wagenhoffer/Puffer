@@ -7,6 +7,7 @@ using ForwardDiff
 using BSplineKit
 using Statistics
 using SpecialFunctions
+using CUDA
 
 defaultDict = Dict(:T => Float64,
     :N => 64,

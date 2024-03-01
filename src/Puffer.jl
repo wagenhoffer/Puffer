@@ -11,7 +11,7 @@ export move_foil!, rotate_about, rotate_about!, create_foils
 
 include("./Wake.jl")
 export Wake, move_wake!, wake_self_vel!, body_to_wake!, vortex_to_target, release_vortex!
-export cancel_buffer_Γ!
+export cancel_buffer_Γ!, cast_and_pull
 
 include("./Panel.jl")
 export source_inf,
