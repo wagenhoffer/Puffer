@@ -4,13 +4,14 @@ using Puffer
 using Plots
 
 heave_pitch = deepcopy(defaultDict)
-heave_pitch[:N] = 64
-heave_pitch[:Nt] = 64
-heave_pitch[:Ncycles] = 2
+heave_pitch[:N] = 100
+heave_pitch[:Nt] = 150
+heave_pitch[:Ncycles] = 3
 heave_pitch[:f] = 1.0
 heave_pitch[:Uinf] = 1
 heave_pitch[:kine] = :make_heave_pitch
-θ0 = deg2rad(5)
+heave_pitch[:ψ]=0.0
+θ0 = -0.05#deg2rad(5)
 h0 = 0.0
 heave_pitch[:motion_parameters] = [h0, θ0]
 
@@ -27,9 +28,23 @@ begin
         # Nice steady window for plotting
         plot(foil, wake)            
     end
-    gif(movie, "./images/handp.gif", fps = 10)Review
+    gif(movie, "./images/handp.gif", fps = 30)
+    plot(foil, wake)
 end
 
+
+begin
+    thetas = zeros(flow.N)
+    for i = 1:flow.N 
+        h = foil.kine[1](foil.f, i * flow.Δt)
+        thetas[i] = foil.kine[2](foil.f, i * flow.Δt, foil.ψ)
+        
+    end
+    @show thetas[1],thetas[end]
+    plot(thetas)
+
+
+end
 begin
     Nt = N = 64
     moored = deepcopy(defaultDict)

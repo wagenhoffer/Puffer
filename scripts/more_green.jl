@@ -56,7 +56,7 @@ function build_dataloaders(mp::ModelParams; data="single_swimmer_ks_0.35_2.0_fs_
     perfs = zeros(4, size(data,1))
     ns = coeffs[1,:coeffs]|>size|>last
     for (i,r) in enumerate(eachrow(coeffs))
-        perf =  r.reduced_freq < 1 ? r.coeffs : r.coeffs ./ (r.reduced_freq^2)
+        perf =  r.reduced_freq < 1 ? r.coeffs : r.coeffs ./ (r.reduced_freq^2/r.k)
         perfs[:,ns*(i-1)+1:ns*i] = perf
     end
 
@@ -84,8 +84,8 @@ function build_networks(mp; C = 4, N = 64)
     μAE = build_ae_layers(mp.layers) |> mp.dev
     convNN = SkipConnection(Chain(convenc, convdec), .+)|>mp.dev
     perfNN = Chain(Dense(mp.layers[end],mp.layers[end],Flux.tanh),
-                Dense(mp.layers[end],mp.layers[end]÷2,Flux.tanh),
-                Dense(mp.layers[end]÷2,2,Flux.tanh))|>mp.dev               
+                Dense(mp.layers[end],mp.layers[end],Flux.tanh),
+                Dense(mp.layers[end],3,Flux.tanh))|>mp.dev               
 
    bAE, μAE, convNN, perfNN
 end
@@ -173,7 +173,7 @@ function train_AEs(dataloader, convNN, convNNstate, μAE, μstate, bAE, bstate, 
         if epoch %  mp.epochs /10 == 0
             println("Epoch: $epoch, Loss: $(blosses[end])")
         end
-        if kick == truelse
+        if kick == true
             break
         end
     end
@@ -183,6 +183,15 @@ function train_AEs(dataloader, convNN, convNNstate, μAE, μstate, bAE, bstate, 
         dec = bAE[2],
         convdec = convNN.layers[2]), .+) |> mp.dev
     B_DNN,(convNNlosses, μlosses, blosses)
+end
+
+function build_BDNN(convNN, bAE, mp)
+    B_DNN = SkipConnection(Chain(
+        convenc = convNN.layers[1],
+        enc = bAE[1],
+        dec = bAE[2],
+        convdec = convNN.layers[2]), .+) |> mp.dev
+    B_DNN
 end
 
 function build_L_with_data(mp, dataloader, μAE, B_DNN)
@@ -256,18 +265,24 @@ function train_L(L, Lstate, latentdata, mp, B_DNN, μAE;ϵ=1e-3, linearsamps=100
     end
     Glosses
 end
+
 function train_perfNN(latentdata, perfNN, perfNNstate, mp)
     perflosses = []
     for epoch = 1:mp.epochs
-        for (ν,_,_,_,perf) in latentdata
+        for (ν,_,μs,_,perf) in latentdata
             ν = ν |> mp.dev
-            perf = perf |> mp.dev
+            lift = perf[2,:] |> mp.dev
+            thrust = perf[3,:] |> mp.dev
+            Γs = μs |> mp.dev
+            Γs = Γs[1,:] - Γs[end,:]
             ls = 0.0
             grads = Flux.gradient(perfNN) do m
                 # Evaluate model and loss inside gradient context:
                 y = m(ν)
-                ls = errorL2(y[1,2:end], perf[1,2:end])
-                ls +=  errorL2(y[2,2:end], perf[2,2:end])                
+                ls = errorL2(y[1,:], lift) #lift
+                ls +=  errorL2(y[2,:], thrust)#thrust  
+                ls += errorL2(y[3,:], Γs)             
+                # ls = errorL2(y,[lift'; thrust'; Γs'])
             end
             Flux.update!(perfNNstate, perfNN, grads[1])
             push!(perflosses, ls)  # logging, outside gradient context
@@ -332,15 +347,15 @@ function make_plots_and_save(mp, dataloader, latentdata, convNN, μAE, B_DNN, L,
     rhs = dataloader.data.RHS[:,which]
     rhsa = B_DNN.layers[:convenc](dataloader.data.inputs[:,:,:,which:which]|>mp.dev)
     plot(rhs, label = "Truth",lw=4,c=:red)
-    plot!(rhsa, label="Approx",lw=0.25, marker=:circle)
+    plot!(rhsa, label="Approx", marker=:circle, ms=1,lw=0.25, marker=:circle)
     title!("RHS : error = $(errorL2(rhsa|>cpu, rhs|>cpu))")
     # savefig(joinpath(dir_path,"conv_RHS"*join(["$(layer)->" for layer in mp.layers])[1:end-2]*".png"))
 
 
-    
+    μ = dataloader.data.μs[:,which]
     μa = μAE(μ|>mp.dev)
     plot(μ, label = "Truth",lw=4,c=:red)
-    a = plot!(μa,marker=:circle,lw=0, label="Approx")
+    a = plot!(μa,marker=:circle,lw=0, label="Approx", marker=:circle, ms=1)
     title!("μ : error = $(errorL2(μa|>cpu, μ|>cpu))")
     savefig(joinpath(dir_path,"μAE"*join(["$(layer)->" for layer in mp.layers])[1:end-2]*".png"))
 
@@ -382,7 +397,7 @@ function make_plots_and_save(mp, dataloader, latentdata, convNN, μAE, B_DNN, L,
     G = inv(L|>cpu)
     recon_ν = G*(B_DNN.layers[:enc](latentdata.data.Bs[:,which:which]|>mp.dev)|>cpu)
     plot(latentdata.data.νs[:,which], label="latent signal",lw=1,marker=:circle)
-    a = plot!(recon_ν, label="Approx",lw=1,marker=:circle)
+    a = plot!(recon_ν, label="Approx", marker=:circle, ms=1,lw=1,marker=:circle)
     title!("ν : error = $(errorL2(recon_ν|>cpu, latentdata.data.νs[:,which]|>cpu))")
     plot(latentdata.data.μs[:,which], label="μ Truth")
     b = plot!(μAE.layers.decoder(recon_ν|>mp.dev), label="μ DG ")
@@ -396,10 +411,10 @@ function make_plots_and_save(mp, dataloader, latentdata, convNN, μAE, B_DNN, L,
     plot!(c, colorbar=:false)
     title!("Latent")
     plot(latentdata.data.perfs[1,ns*which+1:ns*(which+1)], label="Truth")
-    a = plot!(perfNN(latentdata.data.νs[:,ns*which+1:ns*(which+1)])[1,:], label="Approx")
+    a = plot!(perfNN(latentdata.data.νs[:,ns*which+1:ns*(which+1)])[2,:], label="Approx", marker=:circle, ms=1)
     title!("Lift")
     plot(latentdata.data.perfs[2,ns*which+1:ns*(which+1)], label="Truth")
-    b = plot!(perfNN(latentdata.data.νs[:,ns*which+1:ns*(which+1)])[2,:], label="Approx")
+    b = plot!(perfNN(latentdata.data.νs[:,ns*which+1:ns*(which+1)])[3,:], label="Approx", marker=:circle, ms=1)
     title!("Thrust")
     plot(c,a,b, layout = (3,1), size = (1200,800))
     savefig(joinpath(dir_path,"perfNN"*join(["$(layer)->" for layer in mp.layers])[1:end-2]*".png"))
@@ -413,19 +428,18 @@ function make_plots_and_save(mp, dataloader, latentdata, convNN, μAE, B_DNN, L,
     savefig(joinpath(dir_path,"losses"*join(["$(layer)->" for layer in mp.layers])[1:end-2]*".png"))
 end
 
-layers = [[64,32,16, 8],
+layers = [[64,32,16,8]]
           [64,64,64],
           [64,64,32],
           [64,32,16],
           [64,64,16],          
           [64,32,16,8,4],
-          [64,32,16,8,4,2],
-          [64,32,16,8,4,2,1]]
+          [64,32,16,8,4,2]]
 
 
 for layer in layers            
     @show layer
-    mp = ModelParams(layer,  0.01, 50, 128, errorL2, gpu)
+    mp = ModelParams(layer,  0.01, 50, 4096, errorL2, gpu)
     bAE, μAE, convNN, perfNN = build_networks(mp)
     μstate, bstate, convNNstate, perfNNstate = build_states(mp, bAE, μAE, convNN, perfNN)
     dataloader = build_dataloaders(mp)
@@ -440,4 +454,78 @@ for layer in layers
     save_state(mp)
     make_plots_and_save(mp, dataloader, latentdata, convNN, μAE, B_DNN, L, perfNN, Glosses, μlosses, blosses, convNNlosses)
 end
+begin
+    layer = [64,64,64]
+    layerstr = join(["$(layer)->" for layer in mp.layers])[1:end-2]
+    mp = ModelParams(layer,  0.01, 50, 2048, errorL2, gpu)
+    bAE, μAE, convNN, perfNN = build_networks(mp)
+    μstate, bstate, convNNstate, perfNNstate = build_states(mp, bAE, μAE, convNN, perfNN)
+    B_DNN = build_BDNN(convNN, bAE, mp)
+    dataloader = build_dataloaders(mp)
+    #load previous state
+    load_AEs(;μ="μAE_L$(layerstr).jld2", bdnn="B_DNN_L$(layerstr).jld2")
+    L, Lstate, latentdata = build_L_with_data(mp, dataloader, μAE, B_DNN)
+    load_L(;l="L_L$(layerstr).jld2")
+    @show "Train perfNN"
+    perflosses = train_perfNN(latentdata, perfNN, perfNNstate, mp)
+end
 
+# plot(latentdata.data.perfs[2,:])
+# plot!(dataloader.data.perfs[2,:])
+# plot!(perfs[2,:])
+begin
+    which = rand(1:199)
+    ns = 501
+    c = plot(latentdata.data.νs[:,ns*which+1:ns*(which+1)]|>Array, st=:heatmap, label="input")
+    plot!(c, colorbar=:false)
+    title!("Latent")
+    plot(latentdata.data.perfs[2,ns*which+1:ns*(which+1)], label="Truth",lw=4)
+    a = plot!(perfNN(latentdata.data.νs[:,ns*which+1:ns*(which+1)])[1,:], label="Approx", marker=:circle, ms=1)
+    title!("Lift")
+    plot(latentdata.data.perfs[3,ns*which+1:ns*(which+1)], label="Truth",lw=4)
+    b = plot!(perfNN(latentdata.data.νs[:,ns*which+1:ns*(which+1)])[2,:], label="Approx", marker=:circle, ms=1)
+    title!("Thrust")
+    Γ = latentdata.data.μs[1,ns*which+1:ns*(which+1)] - latentdata.data.μs[end,ns*which+1:ns*(which+1)]
+    d = plot(Γ, label="Truth",lw=4)
+    plot!(d, perfNN(latentdata.data.νs[:,ns*which+1:ns*(which+1)])[3,:], label="Approx", marker=:circle, ms=1)
+    title!("Γ strength")
+    plot(c,a,b,d, layout = (4,1), size = (1200,800))
+end
+
+
+b2perf = Chain(Dense(128,128,Flux.tanh),
+                Dense(128,64,Flux.tanh),
+                Dense(64,2,Flux.tanh))|>mp.dev
+b2perfstate = Flux.setup(Adam(0.01), b2perf)
+b2perflosses = []
+for epoch = 1:500
+    for (_,RHS,μs,perf) in dataloader
+        RHS = RHS |>mp.dev
+        μs = μs |>mp.dev
+        μs = vcat(μs, circshift(μs, (0,-1)))
+        thrust = perf[2:3,:] |>mp.dev
+        ls = 0.0
+        grads = Flux.gradient(b2perf) do m
+            # Evaluate model and loss inside gradient context:
+            ŷ = m(μs)
+            ls = errorL2(ŷ[1,:], thrust[1,:])
+            ls += errorL2(ŷ[2,:], thrust[2,:])
+        end
+        Flux.update!(b2perfstate, b2perf, grads[1])
+        push!(b2perflosses, ls)  # logging, outside gradient context
+    end
+    if epoch % 10 == 0
+        println("Epoch: $epoch, Loss: $(b2perflosses[end])")
+    end
+end
+
+begin
+    which = rand(1:200)
+    ns = 501
+
+    plot(dataloader.data.perfs[2:3,ns*which+1:ns*(which+1)]', label="Truth")
+    info = 
+    timed = map(x-> vcat(x , circshift(x, (0,-1))),[dataloader.data.μs[:,ns*which+1:ns*(which+1)]])[1]
+    b = plot!(b2perf(timed|>gpu)', label="Approx", marker=:circle, ms=1)
+    title!("Thrust")
+end

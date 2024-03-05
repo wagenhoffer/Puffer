@@ -127,6 +127,7 @@ function get_performance(foil, flow, p)
     dpress = sum(dforce .* foil.panel_vel, dims = 2)
     power = sum(dpress, dims = 1)[1]
 
+    #Force, lift, thrust, power
     [sum(sqrt.(force .^ 2)), lift, thrust, power / flow.Uinf]
 end
 

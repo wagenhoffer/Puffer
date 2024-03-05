@@ -154,7 +154,7 @@ function make_eldredge(α, αdot; s = 0.001, chord = 1.0, Uinf = 1.0)
 end
 
 function no_motion(; T = Float64)
-    sig(x, f, k, t) = 0.0
+    sig(x, f, k, t,ψ) = 0.0
 end
 
 function angle_of_attack(; aoa = 5, T = Float64)
@@ -182,7 +182,7 @@ function norms!(foil::Foil)
     nothing
 end
 
-function move_edge!(foil::Foil, flow::FlowParams; startup = false)
+function move_edge!(foil::Foil, flow::FlowParams; startup = false, edge_length= 0.4)
     edge_vec = [
         (foil.tangents[1, end] - foil.tangents[1, 1]),
         (foil.tangents[2, end] - foil.tangents[2, 1]),
@@ -190,9 +190,10 @@ function move_edge!(foil::Foil, flow::FlowParams; startup = false)
     edge_vec ./= norm(edge_vec)
     edge_vec .*= flow.Uinf * flow.Δt
     #The edge starts at the TE -> advects some scale down -> the last midpoint
-    foil.edge = [foil.foil[:, end] (foil.foil[:, end] .+ 0.4 * edge_vec) foil.edge[:, 2]]
+    foil.edge = [foil.foil[:, end] (foil.foil[:, end] .+  edge_length * edge_vec) foil.edge[:, 2]]
+    foil.edge = [foil.foil[:, end] (foil.foil[:, end] .+  edge_length * edge_vec) (foil.foil[:, end] .+ (1.0 + edge_length)* edge_vec)]
     if startup
-        foil.edge = [foil.foil[:, end] (foil.foil[:, end] .+ 0.4 * edge_vec) (foil.foil[:, end] .+ 1.4 * edge_vec)]
+        foil.edge = [foil.foil[:, end] (foil.foil[:, end] .+  edge_length * edge_vec) (foil.foil[:, end] .+ (1.0 + edge_length)* edge_vec)]
     end
     nothing
 end

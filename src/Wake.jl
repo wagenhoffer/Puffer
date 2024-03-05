@@ -101,17 +101,19 @@ end
 vortex_to_target(wake::Wake,flow) = vortex_to_target(wake.xy, wake.xy, wake.Γ, flow)
 @inbounds @views macro dx(s,t) esc(:( ($t[1 ,:] .- $s[1,:]') )) end
 @inbounds @views macro dy(s,t) esc(:( ($t[2 ,:] .- $s[2,:]') )) end
-
-function cast_and_pull(sources, targets, Γs,flow)    
+function cast_and_pull(sources, targets, Γs)
     @inbounds @views function vt!(vel,S,T,Γs,δ)
         n = size(S,2)
-        @show n
-        mat = CUDA.zeros(Float32, n,n)    
+        m = size(T,2)
+        mat = CUDA.zeros(Float32, m,n)    
+        S = S|>CuArray
+        T = T|>CuArray
+        Γs = Γs|>CuArray
         dx = @dx(S,T)
         dy = @dy(S,T)
-        @. mat = Γs /(2π * sqrt((dx.^2 .+ dy.^2 )^2 + δ^4))
-        @views vel[1,:] = -sum(dy .* mat, dims = 1)
-        @views vel[2,:] =  sum(dx .* mat, dims = 1)
+        @. mat = Γs' /(2π * sqrt((dx.^2 .+ dy.^2 )^2 + δ^4))
+        @views vel[1,:] = sum(dy .* mat, dims = 2)
+        @views vel[2,:] = -sum(dx .* mat, dims = 2)
         return nothing
     end
     vel = CUDA.zeros(Float32, size(targets)...)
@@ -119,8 +121,7 @@ function cast_and_pull(sources, targets, Γs,flow)
     vel|>Array    
 end
 
-function release_vortex!(wake::Wake, foil::Foil)
-    # wake.xy = [wake.xy foil.edge[:, end]]
+function release_vortex!(wake::Wake, foil::Foil)    
     wake.xy = [wake.xy foil.edge[:, 2]]
     wake.Γ = [wake.Γ..., (foil.μ_edge[1] - foil.μ_edge[2])]
     # Set all back to zero for the next time step

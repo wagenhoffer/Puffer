@@ -167,9 +167,9 @@ velocity from motion
 Tack on the wake influence outside of this function
 """
 function setσ!(foil::Foil, flow::FlowParams; U_b = nothing)
-    U_b = isnothing(U_b) ? flow.Uinf : U_b
+    U_b = isnothing(U_b) ? -flow.Uinf : U_b
     get_panel_vels!(foil, flow)
-    foil.σs = (-U_b .+ foil.panel_vel[1, :]) .* foil.normals[1, :] +
+    foil.σs = (U_b .+ foil.panel_vel[1, :]) .* foil.normals[1, :] +
               (foil.panel_vel[2, :]) .* foil.normals[2, :]
     nothing
 end
@@ -194,10 +194,11 @@ function panel_pressure(foil::Foil, flow, old_mus, old_phis, phi; U_b = nothing)
 
     qt = get_qt(foil)
     qt .+= repeat(foil.σs', 2, 1) .* foil.normals
+    # qt .-= foil.wake_ind_vel 
 
     p_s = sum((qt + foil.wake_ind_vel) .^ 2, dims = 1) / 2.0
     p_us = dmudt' + dphidt' -
-           sum(([U_b; 0] .+ foil.panel_vel) .* (qt .+ foil.wake_ind_vel), dims = 1)
+           sum(([U_b; 0] .+ foil.panel_vel) .* (qt), dims = 1)
     # Calculate the total pressure coefficient
     """
     ∫∞→Px1 d(∇×Ψ)/dt dC + dΦ/dt|body - (VG + VGp + (Ωxr))⋅∇(Φ + ϕ) + 1/2||∇Φ +(∇×Ψ)|^2  = Pinf - Px1 /ρ
