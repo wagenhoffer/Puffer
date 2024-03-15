@@ -555,7 +555,9 @@ for i=0:199
     clts[:,:,i+1] = forces[i+1][2:3,:]
     νembs[:,:,i+1] .=  vcat(νs, nx', ny', times') 
 end
-
+νembs = reshape(νembs, (11,200*ns))
+clts = reshape(clts, (2,200*ns))
+pinndata = DataLoader((νs=νembs, cls=clts), batchsize=mp.batchsize, shuffle=true)
 a = plot()
 i = 0 
 for pos in poss[1:10:100]
@@ -578,25 +580,38 @@ movie = @animate for (normal, pos) in zip(normals, poss)
 end
 gif(movie, "normal_embed.gif", fps = 30)
 
-νemb = vcat(νs, nx', ny', times') 
+# νemb = vcat(νs, nx', ny', times') 
 
 nusize = size(νs,1)
 nuext = nusize + 3 #x,y,t
+# inputs ν,x,y,t -> ν   ̂ν, P_ish
 PINN = Chain(Dense(nuext, nuext, tanh),
              Dense(nuext, nuext, tanh),
-             Dense(nuext, nusize))|>mp.dev
+             Dense(nuext, 2))|>mp.dev
 PINN(νemb|>mp.dev)
 
 pinnstate = Flux.setup(Adam(0.001), PINN)
 losses = []
 for epoch = 1:50
-    for (ν,_,_,_,_) in latentdata
+    for (ν,lt) in pinndata
         ν = ν |> mp.dev
+        lift  = lt[1,:] |> mp.dev
+        thrst = lt[2,:] |> mp.dev
         ls = 0.0
         grads = Flux.gradient(PINN) do m
-            # Evaluate model and loss inside gradient context:
-            ŷ = m(ν)
-            ls = errorL2(ŷ, ν)
+           # Evaluate model and loss inside gradient context:
+
+            y = m(ν)
+            ls = Flux.mse(y.^2, 0.0)
+            #approximate the Unsteady Bernoulli's equation
+            # ∂ν/∂t + ν ∇⋅(ν) + |∇ν|^2 + P_ish = 0
+            y[end]  
+            # then forces are equal to 
+            # 0 = -Pish⋅n⋅dS
+            ct = errorL2(-y[2,:].*ν[end-2,:], thrst)
+            cl = errorL2(-y[2,:].*ν[end-1,:], lift)
+            ls += ct + cl            
+            
         end
         Flux.update!(pinnstate, PINN, grads[1])
         push!(losses, ls)  # logging, outside gradient context
