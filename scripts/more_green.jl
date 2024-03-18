@@ -550,7 +550,7 @@ for i=0:199
     # poss = data[full_sim,:position]
     normals = data[full_sim,:normals]
     nx = map(normal->mean(normal[1,:]), normals)
-    ny = map(normal->mean(normal[2,33:end]),normals)
+    ny = map(normal->mean(normal[2,33:end]), normals)
     νs = allnus[:,full_sim]
     clts[:,:,i+1] = forces[i+1][2:3,:]
     νembs[:,:,i+1] .=  vcat(νs, nx', ny', times') 
@@ -603,14 +603,18 @@ for epoch = 1:50
 
             y = m(ν)
             ls = Flux.mse(y.^2, 0.0)
-            #approximate the Unsteady Bernoulli's equation
-            # ∂ν/∂t + ν ∇⋅(ν) + |∇ν|^2 + P_ish = 0
-            y[end]  
-            # then forces are equal to 
-            # 0 = -Pish⋅n⋅dS
-            ct = errorL2(-y[2,:].*ν[end-2,:], thrst)
-            cl = errorL2(-y[2,:].*ν[end-1,:], lift)
-            ls += ct + cl            
+            dd = gradient(x->sum(m(x)),ν)[1]
+            dt = dd[end,:]
+            dx = dd[end-2,:]
+            dy = dd[end-1,:]
+            # #approximate the Unsteady Bernoulli's equation
+            # # ∂ν/∂t + ν ∇⋅(ν) + |∇ν|^2 + P_ish = 0
+            dt + sum(y[1,:].*[dx dy]) + sum(y[1,:].^2) + y[2,:]
+            # # then forces are equal to 
+            # # 0 = -Pish⋅n⋅dS
+            # ct = errorL2(-y[2,:].*ν[end-2,:], thrst)
+            # cl = errorL2(-y[2,:].*ν[end-1,:], lift)
+            # ls += ct + cl            
             
         end
         Flux.update!(pinnstate, PINN, grads[1])
@@ -621,3 +625,21 @@ for epoch = 1:50
     end
 end
 
+Zygote.gradient(x -> sum(PINN(x)), ν)[1]
+withgradient(PINN) do m 
+    y = m(ν)
+    sum(y)
+ end
+withgradient([1,2,4]) do x
+    z = 1 ./ x
+    sum(z), z  # here z is an auxillary output
+ end
+
+ gradient(/, 1, 2)\
+y, back = Zygote.pullback(sin, 0.5);
+
+y,back = Zygote.pullback(PINN) do m
+    m(ν)
+    y = m(ν)
+    ls = Flux.mse(y.^2, 0.0)
+end
