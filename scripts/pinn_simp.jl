@@ -2,6 +2,7 @@
 using Optimisers, Zygote, Plots, Random, Distributions
 using Flux
 using ReverseDiff
+using ForwardDiff
 SEED = 42
 N_collocation_points = 50
 HIDDEN_DEPTH = 100
@@ -82,18 +83,18 @@ function loss_forward(p)
 
     return total_loss
 end
+dur(m, xs) = gradient(x->sum(m(x)), xs)
+    # ddur(xs) = ReverseDiff.hessian(x->sum(fN(x)), xs)
+dduf(m, xs) = ForwardDiff.hessian(x->sum(m(x)), xs)
 function loss_forward_2(;fN=fN)
-    u = fN(interior_collocation_points)    
-  
-    dur(xs) = gradient(x->sum(fN(x)), xs)
-    ddur(xs) = ReverseDiff.hessian(x->sum(fN(x)), xs)
-    dduf(xs) = ForwardDiff.hessian(x->sum(fN(x)), xs)
-    
-    dudx = dur(interior_collocation_points)
-    d2udx2 = ddur(interior_collocation_points[:,1:10])
-    d2udx2f = dduf(interior_collocation_points)
-    d2udx2 = [d2udx2[i,i] for i=1:length(interior_collocation_points)]
-    Flux.hessian(fN, u)
+    u = fN(interior_collocation_points)              
+    dudx = dur(fN, interior_collocation_points)
+    # @time d2udx2 = ddur(interior_collocation_points)
+    # @time begin
+    #     d2udx2 = dduf(fN, interior_collocation_points)    
+    #     d2udx2 = [d2udx2[i,i] for i=1:length(interior_collocation_points)]        
+    # end
+    d2udx2 = [dduf(fN, [x])[1] for x in interior_collocation_points]
                 
     interior_residuals = d2udx2' .+ rhs_function.(interior_collocation_points)
 
@@ -107,6 +108,7 @@ function loss_forward_2(;fN=fN)
 
     return total_loss
 end
+@time loss_forward_2()
 function forward_over_reverse_hessian(f,θ)
     ForwardDiff.jacobian(θ) do θ
       Zygote.gradient(x -> f(x), θ)[1]
