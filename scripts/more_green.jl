@@ -30,13 +30,14 @@ end
 
 
 
-function build_dataloaders(mp::ModelParams; data="single_swimmer_ks_0.35_2.0_fs_0.25_4.0_ang_car.jls", coeffs= "single_swimmer_coeffs_ks_0.35_2.0_fs_0.25_4.0_ang_car.jls")
+function build_dataloaders(mp::ModelParams; data_file="single_swimmer_ks_0.35_2.0_fs_0.25_4.0_ang_car.jls", coeffs_file= "single_swimmer_coeffs_ks_0.35_2.0_fs_0.25_4.0_ang_car.jls")
     # load/ prep  training data
-    data = deserialize(joinpath("data", data))
-    coeffs = deserialize(joinpath("data", coeffs))
+    data = deserialize(joinpath("data", data_file))
+    coeffs = deserialize(joinpath("data", coeffs_file))
    
     RHS = hcat(data[:, :RHS]...).|>Float32
-    μs = hcat(data[:, :μs]...).|>Float32
+    μs  = hcat(data[:, :μs]...).|>Float32
+    P   = vcat(data[:, :pressure]...).|>Float32
 
     N = mp.layers[1]
     
@@ -60,7 +61,7 @@ function build_dataloaders(mp::ModelParams; data="single_swimmer_ks_0.35_2.0_fs_
         perfs[:,ns*(i-1)+1:ns*i] = perf
     end
 
-    dataloader = DataLoader((inputs=inputs, RHS=RHS, μs=μs, perfs=perfs), batchsize=mp.batchsize, shuffle=true)    
+    dataloader = DataLoader((inputs=inputs, RHS=RHS, μs=μs, perfs=perfs, P=P), batchsize=mp.batchsize, shuffle=true)    
 end
 
 # W, H, C, Samples = size(dataloader.data.inputs)
@@ -103,7 +104,7 @@ function train_AEs(dataloader, convNN, convNNstate, μAE, μstate, bAE, bstate, 
     convNNlosses = []    
     kick = false
     for epoch = 1:mp.epochs
-        for (x, y,_,_) in dataloader        
+        for (x, y,_,_,_) in dataloader        
             x = x |> mp.dev
             y = y |> mp.dev
             ls = 0.0
@@ -131,7 +132,7 @@ function train_AEs(dataloader, convNN, convNNstate, μAE, μstate, bAE, bstate, 
     μlosses = []
     kick = false
     for epoch = 1:mp.epochs
-        for (_,_,y,_) in dataloader        
+        for (_,_,y,_,_) in dataloader        
             y = y |> mp.dev
             ls = 0.0
             grads = Flux.gradient(μAE) do m
@@ -156,7 +157,7 @@ function train_AEs(dataloader, convNN, convNNstate, μAE, μstate, bAE, bstate, 
     blosses = []
     kick = false
     for epoch = 1:mp.epochs
-        for (x, y,_,_) in dataloader        
+        for (x, y,_,_,_) in dataloader        
             y = y |> mp.dev
             ls = 0.0
             grads = Flux.gradient(bAE) do m
@@ -347,7 +348,7 @@ function make_plots_and_save(mp, dataloader, latentdata, convNN, μAE, B_DNN, L,
     rhs = dataloader.data.RHS[:,which]
     rhsa = B_DNN.layers[:convenc](dataloader.data.inputs[:,:,:,which:which]|>mp.dev)
     plot(rhs, label = "Truth",lw=4,c=:red)
-    plot!(rhsa, label="Approx", marker=:circle, ms=1,lw=0.25, marker=:circle)
+    plot!(rhsa, label="Approx", marker=:circle, ms=1,lw=0.25)
     title!("RHS : error = $(errorL2(rhsa|>cpu, rhs|>cpu))")
     # savefig(joinpath(dir_path,"conv_RHS"*join(["$(layer)->" for layer in mp.layers])[1:end-2]*".png"))
 
@@ -355,7 +356,7 @@ function make_plots_and_save(mp, dataloader, latentdata, convNN, μAE, B_DNN, L,
     μ = dataloader.data.μs[:,which]
     μa = μAE(μ|>mp.dev)
     plot(μ, label = "Truth",lw=4,c=:red)
-    a = plot!(μa,marker=:circle,lw=0, label="Approx", marker=:circle, ms=1)
+    a = plot!(μa,marker=:circle,lw=0, label="Approx",  ms=1)
     title!("μ : error = $(errorL2(μa|>cpu, μ|>cpu))")
     savefig(joinpath(dir_path,"μAE"*join(["$(layer)->" for layer in mp.layers])[1:end-2]*".png"))
 
@@ -397,7 +398,7 @@ function make_plots_and_save(mp, dataloader, latentdata, convNN, μAE, B_DNN, L,
     G = inv(L|>cpu)
     recon_ν = G*(B_DNN.layers[:enc](latentdata.data.Bs[:,which:which]|>mp.dev)|>cpu)
     plot(latentdata.data.νs[:,which], label="latent signal",lw=1,marker=:circle)
-    a = plot!(recon_ν, label="Approx", marker=:circle, ms=1,lw=1,marker=:circle)
+    a = plot!(recon_ν, label="Approx", marker=:circle, ms=1,lw=1)
     title!("ν : error = $(errorL2(recon_ν|>cpu, latentdata.data.νs[:,which]|>cpu))")
     plot(latentdata.data.μs[:,which], label="μ Truth")
     b = plot!(μAE.layers.decoder(recon_ν|>mp.dev), label="μ DG ")
@@ -455,9 +456,9 @@ for layer in layers
     make_plots_and_save(mp, dataloader, latentdata, convNN, μAE, B_DNN, L, perfNN, Glosses, μlosses, blosses, convNNlosses)
 end
 begin
-    layer = [64,64,64]
+    # layer = [64,64,64]
     layerstr = join(["$(layer)->" for layer in mp.layers])[1:end-2]
-    mp = ModelParams(layer,  0.01, 50, 2048, errorL2, gpu)
+    mp = ModelParams(layer,  0.01, 50, 4096, errorL2, gpu)
     bAE, μAE, convNN, perfNN = build_networks(mp)
     μstate, bstate, convNNstate, perfNNstate = build_states(mp, bAE, μAE, convNN, perfNN)
     B_DNN = build_BDNN(convNN, bAE, mp)
@@ -493,22 +494,24 @@ begin
 end
 
 
-b2perf = Chain(Dense(128,128,Flux.tanh),
-                Dense(128,64,Flux.tanh),
-                Dense(64,2,Flux.tanh))|>mp.dev
-b2perfstate = Flux.setup(Adam(0.01), b2perf)
+b2perf = Chain(Dense(64,2,  Flux.tanh),
+                Dense(64,64, Flux.tanh),
+                Dense(64,64, Flux.tanh  ),
+                Dense(64,2))|>mp.dev
+b2perfstate = Flux.setup(Adam(0.001), b2perf)
 b2perflosses = []
-for epoch = 1:500
-    for (_,RHS,μs,perf) in dataloader
+for epoch = 1:50
+    for (inp,RHS,μs,perf) in dataloader
         RHS = RHS |>mp.dev
         μs = μs |>mp.dev
-        μs = vcat(μs, circshift(μs, (0,-1)))
+        # inp = reshape(inp,(*(size(inp)[1:3]...),size(inp,4))) |>mp.dev
+        # μs = vcat(μs, circshift(μs, (0,-1)))
         thrust = perf[2:3,:] |>mp.dev
         ls = 0.0
         grads = Flux.gradient(b2perf) do m
             # Evaluate model and loss inside gradient context:
             ŷ = m(μs)
-            ls = errorL2(ŷ[1,:], thrust[1,:])
+            # ls = errorL2(ŷ[1,:], thrust[1,:])
             ls += errorL2(ŷ[2,:], thrust[2,:])
         end
         Flux.update!(b2perfstate, b2perf, grads[1])
@@ -522,10 +525,99 @@ end
 begin
     which = rand(1:200)
     ns = 501
-
-    plot(dataloader.data.perfs[2:3,ns*which+1:ns*(which+1)]', label="Truth")
-    info = 
-    timed = map(x-> vcat(x , circshift(x, (0,-1))),[dataloader.data.μs[:,ns*which+1:ns*(which+1)]])[1]
-    b = plot!(b2perf(timed|>gpu)', label="Approx", marker=:circle, ms=1)
+    xs = 1:ns
+    plot(xs, dataloader.data.perfs[2:3,ns*which+1:ns*(which+1)][2,:], label="Truth")
+    inp = dataloader.data.μs[:,ns*which+1:ns*(which+1)]
+    timed = inp
+    b = plot!(1:2:ns, b2perf(timed|>gpu)[2,1:2:ns], label="Approx", marker=:circle, ms=4,lw=1)
     title!("Thrust")
 end
+
+
+# make an embedding of the latent space with x,y,t components
+forces = coeffs[:,:coeffs]
+which = rand(1:200)
+ns = 501
+full_sim = ns*which+1:ns*(which+1)
+latentdata.data.νs[:,full_sim]
+clts = zeros(2,ns,200)
+νembs = zeros(11,ns,200)|>cpu
+allnus = B_DNN.layers[1:2](inputs[:,:,:,:]|>mp.dev)|>cpu
+for i=0:199
+    full_sim = ns*i+1:ns*(i+1)
+    times = data[full_sim,:t]
+    times = times .- times[1]
+    # poss = data[full_sim,:position]
+    normals = data[full_sim,:normals]
+    nx = map(normal->mean(normal[1,:]), normals)
+    ny = map(normal->mean(normal[2,33:end]),normals)
+    νs = allnus[:,full_sim]
+    clts[:,:,i+1] = forces[i+1][2:3,:]
+    νembs[:,:,i+1] .=  vcat(νs, nx', ny', times') 
+end
+νembs = reshape(νembs, (11,200*ns))
+clts = reshape(clts, (2,200*ns))
+pinndata = DataLoader((νs=νembs, cls=clts), batchsize=mp.batchsize, shuffle=true)
+a = plot()
+i = 0 
+for pos in poss[1:10:100]
+    plot!(a,  pos[1, :].+i,pos[2, :],label="")
+    i+=0.5
+end
+plot!(a, aspect_ratio=true)
+
+
+ind = 1
+normal = normals[ind]
+pos = poss[ind]
+
+
+movie = @animate for (normal, pos) in zip(normals, poss)
+    quiver(pos[1,:], pos[2,:], quiver=(normal[1,:], normal[2,:]),aspect_ratio=true)
+    nx = mean(normal[1,:])
+    ny = mean(normal[2,33:end])
+    quiver!([pos[1,16]], [0], quiver=([nx], [ny]),aspect_ratio=true,color=:black)
+end
+gif(movie, "normal_embed.gif", fps = 30)
+
+# νemb = vcat(νs, nx', ny', times') 
+
+nusize = size(νs,1)
+nuext = nusize + 3 #x,y,t
+# inputs ν,x,y,t -> ν   ̂ν, P_ish
+PINN = Chain(Dense(nuext, nuext, tanh),
+             Dense(nuext, nuext, tanh),
+             Dense(nuext, 2))|>mp.dev
+PINN(νemb|>mp.dev)
+
+pinnstate = Flux.setup(Adam(0.001), PINN)
+losses = []
+for epoch = 1:50
+    for (ν,lt) in pinndata
+        ν = ν |> mp.dev
+        lift  = lt[1,:] |> mp.dev
+        thrst = lt[2,:] |> mp.dev
+        ls = 0.0
+        grads = Flux.gradient(PINN) do m
+           # Evaluate model and loss inside gradient context:
+
+            y = m(ν)
+            ls = Flux.mse(y.^2, 0.0)
+            #approximate the Unsteady Bernoulli's equation
+            # ∂ν/∂t + ν ∇⋅(ν) + |∇ν|^2 + P_ish = 0
+            y[end]  
+            # then forces are equal to 
+            # 0 = -Pish⋅n⋅dS
+            ct = errorL2(-y[2,:].*ν[end-2,:], thrst)
+            cl = errorL2(-y[2,:].*ν[end-1,:], lift)
+            ls += ct + cl            
+            
+        end
+        Flux.update!(pinnstate, PINN, grads[1])
+        push!(losses, ls)  # logging, outside gradient context
+    end
+    if epoch % 10 == 0
+        println("Epoch: $epoch, Loss: $(losses[end])")
+    end
+end
+
