@@ -1,6 +1,7 @@
 using Plots
 using Flux.Data: DataLoader
 using Flux
+using Random
 
 using Statistics
 using LinearAlgebra
@@ -356,6 +357,7 @@ function make_plots_and_save(mp, dataloader, latentdata, convNN, μAE, B_DNN, L,
 
     μ = dataloader.data.μs[:,which]
     μa = μAE(μ|>mp.dev)
+    μa = μAE(μ|>mp.dev)
     plot(μ, label = "Truth",lw=4,c=:red)
     a = plot!(μa,marker=:circle,lw=0, label="Approx",  ms=1)
     title!("μ : error = $(errorL2(μa|>cpu, μ|>cpu))")
@@ -430,7 +432,7 @@ function make_plots_and_save(mp, dataloader, latentdata, convNN, μAE, B_DNN, L,
     savefig(joinpath(dir_path,"losses"*join(["$(layer)->" for layer in mp.layers])[1:end-2]*".png"))
 end
 
-layers = [[64,32,16]]
+layers = [[64,32,16,8]]
           [64,64,64],
           [64,64,32],
           [64,32,16],
@@ -459,14 +461,14 @@ end
 begin
     layer = layers|>first
     mp = ModelParams(layer,  0.01, 50, 4096, errorL2, gpu)
-    layerstr = join(["$(layer)-_" for layer in mp.layers])[1:end-2]
+    layerstr = join(["$(layer)->" for layer in mp.layers])[1:end-2]
     
     bAE, μAE, convNN, perfNN = build_networks(mp)
     μstate, bstate, convNNstate, perfNNstate = build_states(mp, bAE, μAE, convNN, perfNN)
     B_DNN = build_BDNN(convNN, bAE, mp)
     dataloader = build_dataloaders(mp)
     #load previous state
-    load_AEs(;μ="__AE_L$(layerstr).jld2", bdnn="B_DNN_L$(layerstr).jld2")
+    load_AEs(;μ="μAE_L$(layerstr).jld2", bdnn="B_DNN_L$(layerstr).jld2")
     L, Lstate, latentdata = build_L_with_data(mp, dataloader, μAE, B_DNN)
     load_L(;l="L_L$(layerstr).jld2")
     @show "Train perfNN"
@@ -543,18 +545,19 @@ begin
     coeffs_file= "single_swimmer_coeffs_ks_0.35_2.0_fs_0.25_4.0_ang_car.jls"
     data = deserialize(joinpath("data", data_file))
     coeffs = deserialize(joinpath("data", coeffs_file))
-   
 end
 forces = coeffs[:,:coeffs]
 which = rand(1:200)
 ns = 501
 full_sim = ns*which+1:ns*(which+1)
-latentdata.data.νs[:,full_sim]
-clts = zeros(2,ns,200)
-νembs = zeros(mp.layers[end]+1,ns,200)|>cpu
+# latentdata.data.νs[:,full_sim]
+clts = zeros(2,ns-1,200)
+νembs = zeros(mp.layers[end]+1,ns-1,200)|>cpu
 allnus = B_DNN.layers[1:2](inputs[:,:,:,:]|>mp.dev)|>cpu
+pos = zeros(Float32, 64,2, (ns -1), 200)
+μtrim = zeros(Float32, 64, (ns-1),200)
 for i=0:199
-    full_sim = ns*i+1:ns*(i+1)
+    full_sim = ns*i+1:ns*(i+1) - 1
     times = data[full_sim,:t]
     # times = times .- times[1]
     times = times .% times[101]
@@ -563,14 +566,17 @@ for i=0:199
     nx = map(normal->mean(normal[1,:]), normals)
     ny = map(normal->mean(normal[2,33:end]), normals)
     νs = allnus[:,full_sim]
-    clts[:,:,i+1] = forces[i+1][2:3,:]
-    νembs[:,:,i+1] .=  vcat(νs, times') 
+    clts[:,:,i+1] = forces[i+1][2:3,1:end-1]
+    νembs[:,:,i+1] .=  vcat(νs, times')
+    pos[:,:,:,i+1] .= inputs[3:end-2,:,1,full_sim]
+    μtrim[:,:,i+1] = μs[:,full_sim]
     # νembs[:,:,i+1] .=  νs
 end
-νembs = reshape(νembs, (mp.layers[end]+1,200*ns))
-clts = reshape(clts, (2,200*ns))
-pos = inputs[3:end-2,:,1,:]
-pinndata = DataLoader((νs=νembs.|>Float32, clts=clts.|>Float32, pos = pos.|>Float32, μs = μs.|>Float32), batchsize=100, shuffle=false)
+νembs = reshape(νembs, (mp.layers[end]+1,200*(ns-1 )))
+clts = reshape(clts, (2,200*(ns-1)))
+pos = reshape(pos, (size(pos)[1:2]...,200*(ns-1)))
+μtrim = reshape(μtrim, (size(μtrim)[1]...,200*(ns-1)))
+pinndata = DataLoader((νs=νembs.|>Float32, clts=clts.|>Float32, pos = pos.|>Float32, μs = μtrim.|>Float32), batchsize=100, shuffle=false)
 
 test = collect(Iterators.take(pinndata,50))
 
@@ -583,7 +589,7 @@ plot!()
 
 
 
-nusize = size(allnus,1)
+nusize = 8 #size(allnus,1)
 nuext = nusize + 3 #x,y,t
 # inputs ν[8x1],x,y,t ->  ̂ν[2,1], P_ish
 # PINN = Chain(Dense(nuext, nuext, tanh),
@@ -660,6 +666,7 @@ for epoch = 1:1
         Flux.update!(pinnstate, pipe, grads[1])
         push!(pinnlosses, ls)  # logging, outside gradient context
     end
+
     if epoch % 10 == 0
         println("Epoch: $epoch, Loss: $(pinnlosses[end])")
     end
