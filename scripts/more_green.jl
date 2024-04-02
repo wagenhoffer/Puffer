@@ -57,8 +57,9 @@ function build_dataloaders(mp::ModelParams; data_file="single_swimmer_ks_0.35_2.
     perfs = zeros(4, size(data,1))
     ns = coeffs[1,:coeffs]|>size|>last
     for (i,r) in enumerate(eachrow(coeffs))
-        perf =  r.reduced_freq < 1 ? r.coeffs : r.coeffs ./ (r.reduced_freq^2/r.k)
-        perfs[:,ns*(i-1)+1:ns*i] = perf
+        # perf =  r.reduced_freq < 1 ? r.coeffs : r.coeffs ./ (r.reduced_freq^2/r.k)
+        # perfs[:,ns*(i-1)+1:ns*i] = perf
+        perfs[:,ns*(i-1)+1:ns*i] = r.coeffs
     end
 
     dataloader = DataLoader((inputs=inputs, RHS=RHS, μs=μs, perfs=perfs, P=P'), batchsize=mp.batchsize, shuffle=true)    
@@ -550,23 +551,25 @@ ns = 501
 full_sim = ns*which+1:ns*(which+1)
 latentdata.data.νs[:,full_sim]
 clts = zeros(2,ns,200)
-νembs = zeros(11,ns,200)|>cpu
+νembs = zeros(8,ns,200)|>cpu
 allnus = B_DNN.layers[1:2](inputs[:,:,:,:]|>mp.dev)|>cpu
 for i=0:199
     full_sim = ns*i+1:ns*(i+1)
     times = data[full_sim,:t]
-    times = times .- times[1]
+    # times = times .- times[1]
+    times = times .% times[101]
     # poss = data[full_sim,:position]
     normals = data[full_sim,:normals]
     nx = map(normal->mean(normal[1,:]), normals)
     ny = map(normal->mean(normal[2,33:end]), normals)
     νs = allnus[:,full_sim]
     clts[:,:,i+1] = forces[i+1][2:3,:]
-    νembs[:,:,i+1] .=  vcat(νs, nx', ny', times') 
+    # νembs[:,:,i+1] .=  vcat(νs, nx', ny', times') 
+    νembs[:,:,i+1] .=  νs
 end
-νembs = reshape(νembs, (11,200*ns))
+νembs = reshape(νembs, (8,200*ns))
 clts = reshape(clts, (2,200*ns))
-pinndata = DataLoader((νs=νembs, cls=clts), batchsize=mp.batchsize, shuffle=true)
+pinndata = DataLoader((νs=νembs.|>Float32, clts=clts.|>Float32, pos = pos), batchsize=mp.batchsize, shuffle=true)
 
 
 
@@ -575,96 +578,122 @@ pinndata = DataLoader((νs=νembs, cls=clts), batchsize=mp.batchsize, shuffle=tr
 
 
 nusize = size(allnus,1)
-nuext = nusize + 3 #x,y,t
-# inputs ν[8x1],x,y,t ->  ̂ν, P_ish
+nuext = nusize + 0 #x,y,t
+# inputs ν[8x1],x,y,t ->  ̂ν[2,1], P_ish
 PINN = Chain(Dense(nuext, nuext, tanh),
-             Dense(nuext, nuext, tanh),
+             Dense(nuext, nuext, tanh),             
              Dense(nuext, 2))|>mp.dev
 
-pinnstate = Flux.setup(Adam(0.001), PINN)
-losses = []
-for epoch = 1:10
+ts = 55
+trunk = Chain(Conv((4,), 2=>2, Flux.tanh),
+              Conv((4,), 2=>2, Flux.tanh),
+              Conv((4,), 2=>1, Flux.tanh),
+              x -> reshape(x, :, size(x,3)),
+             Dense(ts, ts, tanh),
+             Dense(ts, 2)) |>mp.dev
+trunk(pos[:,:,1:1])
+# pipe out puts 4x1 of latent space nu P x y
+pipe = Parallel(vcat, PINN, trunk)
+pinnstate = Flux.setup(Adam(0.01), pipe)
+
+
+function set_dir(ndirs, whichdir)
+    dir = zeros(Float32, ndirs)
+    dir[whichdir] = 1.0
+    dir
+end
+dx = set_dir(11,9)*ϵ
+dy = set_dir(11,10)*ϵ
+dt = set_dir(11,11)*ϵ
+ϵ = eps(Float32)^0.5
+
+
+pinnlosses = []
+for epoch = 1:100
     @show epoch
-    for (ν,lt) in pinndata
+    for (ν,lt,pxy) in pinndata
         ν = ν |> mp.dev
         lift  = lt[1,:] |> mp.dev
         thrst = lt[2,:] |> mp.dev
-        ls = 0.0
-        grads = Flux.gradient(PINN) do m
+        pxy = pxy |> mp.dev
+        global ls = 0.0
+        grads = Flux.gradient(pipe) do m
            # Evaluate model and loss inside gradient context:
 
-            y = m(ν)
-            ls = Flux.mse(y.^2, 0.0)
-            # dd = gradient(x->sum(PINN(x)),ν)
-            y, back = Flux.pullback(x->sum(PINN(x)), ν)
-            dd = back(one(y))
-            dt = dd[1][end,:]
-            dx = dd[1][end-2,:]
-            dy = dd[1][end-1,:]
-            # # #approximate the Unsteady Bernoulli's equation
-            # # ∂ν/∂t + ν ∇⋅(ν) + |∇ν|^2 + P_ish = 0
-            bern = dt + sum([y[1,:] y[1,:]].*[dx dy], dims=2) .+ y[1,:].^2 + y[2,:]
-            ls = Flux.mse(bern, 0.0)
+            y = m(ν,pxy)
+            # me = Flux.mse(y.^2, 0.0)
+            
+            # ddt = (m(ν .+ dt) - m(ν))/ϵ
+            # ddx = (m(ν .+ dx) - m(ν))/ϵ
+            # ddy = (m(ν .+ dy) - m(ν))/ϵ
+            # # # #approximate the Unsteady Bernoulli's equation
+            # # # ∂ν/∂t + ν ∇⋅(ν) + |∇ν|^2 + P_ish = 0
+            # bern = ddt[1,:] + sum([y[1,:] y[1,:]].*[ddx[1,:] ddy[1,:]], dims=2) .+ y[1,:].^2 + y[2,:]
+            bern = y[1,:].^2/2.0 + y[2,:]
+            be = Flux.mse(bern, 0.0)            
             # # # then forces are equal to 
             # # # 0 = -Pish⋅n⋅dS
-            ct = errorL2(-y[2,:].*ν[end-2,:], thrst)
-            cl = errorL2(-y[2,:].*ν[end-1,:], lift)
-            ls += ct + cl                        
+            ct = errorL2(-y[2,:].*y[3,:], thrst)
+            cl = errorL2(-y[2,:].*y[4,:], lift)
+            ls = cl + ct + be 
+            # @show ls 
+            ls                    
         end
-        Flux.update!(pinnstate, PINN, grads[1])
-        push!(losses, ls)  # logging, outside gradient context
+        Flux.update!(pinnstate, pipe, grads[1])
+        push!(pinnlosses, ls)  # logging, outside gradient context
     end
     if epoch % 10 == 0
-        println("Epoch: $epoch, Loss: $(losses[end])")
+        println("Epoch: $epoch, Loss: $(pinnlosses[end])")
     end
 end
 
-using Flux, Plots
-data = [([x], 2x-x^3) for x in -2:0.1f0:2]
 
-model = Chain(Dense(1 => 23, tanh), Dense(23 => 1, bias=false), only)
+# begin
+#     which = rand(1:199)
+#     ns = 501
+#     samp = pinndata.data.νs[:,ns*which+1:ns*(which+1)]
+#     x  = samp[9,:]
+#     y  = samp[10,:]
+#     c = plot(samp|>Array, st=:heatmap, label="input")
+#     plot!(c, colorbar=:false)
+#     title!("Latent")
+#     plot(pinndata.data.clts[1,ns*which+1:ns*(which+1)], label="Truth",lw=4)
+#     a = plot!(-x.*PINN(samp)[2,:], label="Approx", marker=:circle, ms=1)
+#     title!("Lift")
+#     plot(pinndata.data.clts[2,ns*which+1:ns*(which+1)], label="Truth",lw=4)
+#     b = plot!(-y.*PINN(samp)[2,:], label="Approx", marker=:circle, ms=1)
+#     title!("Thrust")
+#     c = plot(-y.*PINN(samp)[2,:], label="y", marker=:circle, ms=1)
+#         plot!(c, x.*PINN(samp)[2,:], label="x", marker=:circle, ms=1)
 
-optim = Flux.setup(Adam(), model)
-for epoch in 1:1000
-  Flux.train!((m,x,y) -> (m(x) - y)^2, model, data, optim)
+#     # Γ = latentdata.data.μs[1,ns*which+1:ns*(which+1)] - latentdata.data.μs[end,ns*which+1:ns*(which+1)]
+#     # d = plot(Γ, label="Truth",lw=4)
+#     # plot!(d, perfNN(latentdata.data.νs[:,ns*which+1:ns*(which+1)])[3,:], label="Approx", marker=:circle, ms=1)
+#     # title!("Γ strength")
+#     plot(a,b,c,  layout = (3,1), size = (1200,800))
+# end
+
+
+begin
+    which = rand(1:199)
+    ns = 501
+    slice = ns*which+1:ns*(which+1)
+    samp = pinndata.data.νs[:,slice]
+    spxy = pinndata.data.pos[:,:,slice]
+    
+    out = pipe(samp,spxy)
+    nuh = out[1,:]
+    ph  = out[2,:]
+    x = out[3,:]
+    y = out[4,:]
+    plot(pinndata.data.clts[1,ns*which+1:ns*(which+1)], label="Truth",lw=4)
+    a = plot!(-ph.*y, label="Approx", marker=:circle, ms=1)
+    title!("Lift")
+    plot(pinndata.data.clts[2,ns*which+1:ns*(which+1)], label="Truth",lw=4)
+    b = plot!(-ph.*x, label="Approx", marker=:circle, ms=1)
+    title!("Thrust")
+    plot(x, label="x")
+    c = plot!(y, label="y", lw= 0 , marker=:circle, ms=2)
+    plot(a,b,c, layout = (3,1), size = (1200,800))
+
 end
-
-plot(x -> 2x-x^3, -2, 2, legend=false)
-scatter!(x -> model([x]), -2:0.1f0:2)
-    sum(y)
- end
-withgradient([1,2,4]) do x
-    z = 1 ./ x
-    sum(z), z  # here z is an auxillary output
- end
-
-gradient(/, 1, 2)
-y, back = Zygote.pullback(sin, 1.0);
-back(1.0)
-y,back = Zygote.pullback(PINN) do m
-    m(ν)
-    y = m(ν)
-    ls = Flux.mse(y.^2, 0.0)
-end
-
-ja = Flux.jacobian(PINN, ν)[1]
-for i = 1:4096
-
-    println(ja[i+1:2,:])
-end
-@view ja[1:2:size(ja,1),2:2:size(ja,1), 1:11:size(ja,2),11:size(ja,2)]
-collect(1:2:size(ja,1))
-collect(1:11:size(ja,2))
-
-using Flux, Plots
-data = [([x], 2x-x^3) for x in -2:0.1f0:2]
-
-model = Chain(Dense(1 => 16, tanh), Dense(16 => 1,  bias=true), only)
-
-optim = Flux.setup(Adam(), model)
-for epoch in 1:10000
-  Flux.train!((m,x,y) -> (m(x) - y)^2, model, data, optim)
-end
-
-plot(x -> 2x-x^3, -2, 2, legend=false)
-scatter!(x -> model([x]), -2:0.1f0:2)
