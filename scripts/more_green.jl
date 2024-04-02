@@ -576,11 +576,10 @@ pinndata = DataLoader((νs=νembs, cls=clts), batchsize=mp.batchsize, shuffle=tr
 
 nusize = size(allnus,1)
 nuext = nusize + 3 #x,y,t
-# inputs ν,x,y,t -> ν   ̂ν, P_ish
+# inputs ν[8x1],x,y,t ->  ̂ν, P_ish
 PINN = Chain(Dense(nuext, nuext, tanh),
              Dense(nuext, nuext, tanh),
              Dense(nuext, 2))|>mp.dev
-PINN(νembs|>mp.dev)
 
 pinnstate = Flux.setup(Adam(0.001), PINN)
 losses = []
