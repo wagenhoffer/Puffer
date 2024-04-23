@@ -14,7 +14,7 @@ if CUDA.has_cuda()
 else
     dev = cpu
     @info "Training on CPU"
-endN, *BS
+end
 """
     sines(x; coeffs = ones(N))
 

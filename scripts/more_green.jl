@@ -498,33 +498,6 @@ begin
 end
 
 
-b2perf = Chain(Dense(64,2,  Flux.tanh),
-                Dense(64,64, Flux.tanh),
-                Dense(64,64, Flux.tanh  ),
-                Dense(64,2))|>mp.dev
-b2perfstate = Flux.setup(Adam(0.001), b2perf)
-b2perflosses = []
-for epoch = 1:50
-    for (inp,RHS,μs,perf,_) in dataloader
-        RHS = RHS |>mp.dev
-        μs = μs |>mp.dev
-        # inp = reshape(inp,(*(size(inp)[1:3]...),size(inp,4))) |>mp.dev
-        # μs = vcat(μs, circshift(μs, (0,-1)))
-        thrust = perf[2:3,:] |>mp.dev
-        ls = 0.0
-        grads = Flux.gradient(b2perf) do m
-            # Evaluate model and loss inside gradient context:
-            ŷ = m(μs)
-            # ls = errorL2(ŷ[1,:], thrust[1,:])
-            ls += errorL2(ŷ[2,:], thrust[2,:])
-        end
-        Flux.update!(b2perfstate, b2perf, grads[1])
-        push!(b2perflosses, ls)  # logging, outside gradient context
-    end
-    if epoch % 10 == 0
-        println("Epoch: $epoch, Loss: $(b2perflosses[end])")
-    end
-end
 
 begin
     which = rand(1:200)
@@ -578,24 +551,27 @@ pos = reshape(pos, (size(pos)[1:2]...,200*(ns-1)))
 μtrim = reshape(μtrim, (size(μtrim)[1]...,200*(ns-1)))
 pinndata = DataLoader((νs=νembs.|>Float32, clts=clts.|>Float32, pos = pos.|>Float32, μs = μtrim.|>Float32), batchsize=100, shuffle=false)
 
-test = collect(Iterators.take(pinndata,50))
+test = collect(Iterators.take(pinndata,1000))
 
 plot()
-for i = 15:30
-    plot!(test[i].clts[2,:]  , label="")
+for t in test[900:1000]
+    plot!(t.clts[2,:]  , label="")
 end
 plot!()
 
 
 
 
-nusize = 8 #size(allnus,1)
-nuext = nusize + 3 #x,y,t
+nusize = mp.layers[end] #size(allnus,1)
+nuext = nusize + 3 #x,y,t1
 # inputs ν[8x1],x,y,t ->  ̂ν[2,1], P_ish
 # PINN = Chain(Dense(nuext, nuext, tanh),
 #              Dense(nuext, nuext, tanh),             
 #              Dense(nuext, 3))|>mp.dev
-PINN = Chain(RNN(nuext, nuext, tanh),
+#idea - batch up sequences -> output 3x1 of latent space nu P Γ
+timebatch = 2
+PINN = Chain(GRU(timebatch, 1),
+            x-> transpose(x),
             Dense(nuext, nuext, tanh),             
             Dense(nuext, 3))|>mp.dev                         
 
@@ -606,11 +582,12 @@ trunk = Chain(Conv((4,), 2=>2, Flux.tanh),
               Flux.flatten,
              Dense(ts, ts, tanh),
              Dense(ts, 2)) |>mp.dev
-trunk(test[1].pos)
+txy = trunk(test[1].pos[:,:,1:2])
 # pipe out puts 4x1 of latent space nu P x y
 # pipe = Parallel(vcat, PINN, trunk)
-pipe = PairwiseFusion(vcat, trunk, PINN)
-pipe(pos[:,:,1:1], νembs[:,1:1])
+comp(x,y) = transpose(vcat(x,y))
+pipe = PairwiseFusion(comp, trunk, PINN)
+pipe(pos[:,:,1:2], νembs[:,1:2])
 pinnstate = Flux.setup(Adam(0.01), pipe)
 
 
@@ -622,46 +599,103 @@ end
 ϵ = eps(Float32)^0.5
 dx = set_dir(nuext,1)*ϵ
 dy = set_dir(nuext,2)*ϵ
-dt = set_dir(nuext, nuext)*ϵ
-
-
+dtdir = set_dir(nuext, nuext)
 
 pinnlosses = []
-for epoch = 1:1
+for epoch = 1:10
     @show epoch
     for (ν,lt,pxy,mus) in pinndata
+        nsamps = size(ν,2)
+        # ν = [ν[:,i:i+timebatch-1]' for i=1:nsamps-timebatch] |>mp.dev
         ν = ν |> mp.dev
         lift  = lt[1,:] |> mp.dev
         thrst = lt[2,:] |> mp.dev
         pxy = pxy |> mp.dev
         mus = mus |>mp.dev
         Γ = mus[1,:] - mus[end,:]
+        Δt = (ν[2][end] - ν[1][end])
+        dt = Δt*dtdir
         global ls = 0.0
         Flux.reset!(pipe)
+        
         grads = Flux.gradient(pipe) do m
            # Evaluate model and loss inside gradient context:
-
-            xy, out = m(pxy,ν)
-            # me = Flux.mse(y.^2, 0.0)
+        #    sum(Flux.Losses.mse.([model(x)[1] for x ∈ X[2:end]], Y[2:end]))
+            # ls = 0
             pinn = m.layers[2]
-            lat = vcat(xy,ν)
-            # ddt = (m(ν .+ dt) - m(ν))/ϵ
-            ddx = (pinn(lat .+ dx) - pinn(lat.- dx))/(2ϵ)
-            ddy = (pinn(lat .+ dy) - pinn(lat.-dy))/(2ϵ)
+            out = m.([(pxy[:,:,i:i+timebatch-1],ν[:, i:i+timebatch-1]) for i=1:nsamps-timebatch+1])
+            # me = Flux.mse(y.^2, 0.0)
+            lat = [vcat(out[i][1][:,2], ν[:,i]) for i= 1:nsamps-timebatch+1]
+            ts =  [[lat[i] lat[i+1]] for i=1:nsamps-timebatch]
+          
+            ddx = [(pinn((ts[i] .+ dx)') - pinn((ts[i] .- dx)'))/(2ϵ)  for i=1:nsamps-timebatch]
+            ddy = [(pinn((ts[i] .+ dy)') - pinn((ts[i] .- dy)'))/(2ϵ)  for i=1:nsamps-timebatch]
+            ddt = [(pinn((ts[i] .+ dt)') - pinn((ts[i] .- dt)'))./(2*Δt) for i=1:nsamps-timebatch]
             # # # #approximate the Unsteady Bernoulli's equation
             # # # ∂ν/∂t + ν ∇⋅(ν) + |∇ν|^2 + P_ish = 0
-            bern = sum(ddx[1,:].^2 .+ ddy[1,:].^2, dims=2) + out[2,:]
+            bern = [ddt[i][1] .+ (ddx[i][1].^2 .+ ddy[i][1].^2) .+ out[i][2][2] for i=1:nsamps-timebatch]
             # bern = y[1,:].^2/2.0 + y[2,:]
             be = Flux.mse(bern, 0.0)            
             # # # then forces are equal to 
             # # # 0 = -Pish⋅n⋅dS
-            ct = errorL2(-xy[1,:].*out[2,:], thrst)
-            cl = errorL2(-xy[2,:].*out[2,:], lift)
-            Γe = errorL2(out[3,:], Γ)
+            ct = errorL2([-out[i][1][1,2].*out[i][2][2] for i=1:nsamps-timebatch], thrst[timebatch+1:end])
+            cl = errorL2([-out[i][1][2,2].*out[i][2][2] for i=1:nsamps-timebatch], lift[timebatch+1:end] )
+            Γe = errorL2([o[2][3] for o in out], Γ[timebatch:end])                
+            ls = be + Γe
             
+        end
+        Flux.update!(pinnstate, pipe, grads[1])
+        push!(pinnlosses, ls)  # logging, outside gradient context
+    end
+
+    if epoch % 10 == 0
+        println("Epoch: $epoch, Loss: $(pinnlosses[end])")
+    end
+end
+
+pinnlosses = []
+for epoch = 1:10
+    @show epoch
+    for (ν,lt,pxy,mus) in pinndata
+        ν = [ν[:,i:i+timebatch-1]' for i=1:nsamps-timebatch] |>mp.dev
+        lift  = lt[1,:] |> mp.dev
+        thrst = lt[2,:] |> mp.dev
+        pxy = pxy |> mp.dev
+        mus = mus |>mp.dev
+        Γ = mus[1,:] - mus[end,:]
+
+        Δt = (ν[end,2] - ν[end,1])
+        dt = Δt*dtdir
+        global ls = 0.0
+        Flux.reset!(PINN)
+        nsamps = size(ν,2)
+        grads = Flux.gradient(PINN) do m
+           # Evaluate model and loss inside gradient context:
+        #    sum(Flux.Losses.mse.([model(x)[1] for x ∈ X[2:end]], Y[2:end]))
+            # ls = 0
+            
+            out = m.([ν[i] for i=1:nsamps-timebatch])
+            # me = Flux.mse(y.^2, 0.0)
+            # for i = 2:nsamps
+            wind = 2:nsamps
+            xy, out = m(pxy[:,:,wind],ν[:,wind])                
+            lat = vcat(xy,ν[:,wind])
+            # ddt = (m(ν .+ dt) - m(ν))/ϵ
+            ddx = (pinn(lat .+ dx) - pinn(lat .- dx))/(2ϵ)
+            ddy = (pinn(lat .+ dy) - pinn(lat .- dy))/(2ϵ)
+            ddt = (pinn(lat .+ dt) - pinn(lat .- dt))./(Δt)
+            # # # #approximate the Unsteady Bernoulli's equation
+            # # # ∂ν/∂t + ν ∇⋅(ν) + |∇ν|^2 + P_ish = 0
+            bern = ddt[1,:] + sum(ddx[1,:].^2 .+ ddy[1,:].^2, dims=2) + out[2,:]
+            # bern = y[1,:].^2/2.0 + y[2,:]
+            be = Flux.mse(bern, 0.0)            
+            # # # then forces are equal to 
+            # # # 0 = -Pish⋅n⋅dS
+            ct = errorL2(-xy[1,:].*out[2,:], thrst[wind])
+            cl = errorL2(-xy[2,:].*out[2,:], lift[wind])
+            Γe = errorL2(out[3,:], Γ[wind])                
             ls = cl + ct + be + Γe
-            # @show ls 
-            ls                    
+            
         end
         Flux.update!(pinnstate, pipe, grads[1])
         push!(pinnlosses, ls)  # logging, outside gradient context
@@ -702,7 +736,8 @@ end
 begin
     which = rand(1:199)
     ns = 501
-    slice = ns*which+1:ns*(which+1)
+    Flux.reset!(pipe)
+    slice = ns*which+1:ns*(which+1)-1 #ns*i+1:ns*(i+1) - 1
     samp = pinndata.data.νs[:,slice]
     spxy = pinndata.data.pos[:,:,slice]
     Γs = pinndata.data.μs[1,slice] - pinndata.data.μs[end,slice]
