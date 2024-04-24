@@ -570,7 +570,7 @@ nuext = nusize + 3 #x,y,t1
 #              Dense(nuext, 3))|>mp.dev
 #idea - batch up sequences -> output 3x1 of latent space nu P Γ
 timebatch = 2
-PINN = Chain(GRU(timebatch, 1),
+PINN = Chain(GRU(timebatch => 1),
             x-> transpose(x),
             Dense(nuext, nuext, tanh),             
             Dense(nuext, 3))|>mp.dev                         
@@ -582,12 +582,12 @@ trunk = Chain(Conv((4,), 2=>2, Flux.tanh),
               Flux.flatten,
              Dense(ts, ts, tanh),
              Dense(ts, 2)) |>mp.dev
-txy = trunk(test[1].pos[:,:,1:2])
+txy = trunk(pos[:,:,1:2]|>mp.dev)
 # pipe out puts 4x1 of latent space nu P x y
 # pipe = Parallel(vcat, PINN, trunk)
 comp(x,y) = transpose(vcat(x,y))
 pipe = PairwiseFusion(comp, trunk, PINN)
-pipe(pos[:,:,1:2], νembs[:,1:2])
+pipe(pos[:,:,1:2]|>mp.dev, νembs[:,1:2]|>mp.dev)
 pinnstate = Flux.setup(Adam(0.01), pipe)
 
 
@@ -597,9 +597,9 @@ function set_dir(ndirs, whichdir)
     dir
 end
 ϵ = eps(Float32)^0.5
-dx = set_dir(nuext,1)*ϵ
-dy = set_dir(nuext,2)*ϵ
-dtdir = set_dir(nuext, nuext)
+dx = set_dir(nuext,1)*ϵ |>mp.dev
+dy = set_dir(nuext,2)*ϵ|>mp.dev
+dtdir = set_dir(nuext, nuext)|>mp.dev
 
 pinnlosses = []
 for epoch = 1:10
@@ -614,7 +614,7 @@ for epoch = 1:10
         mus = mus |>mp.dev
         Γ = mus[1,:] - mus[end,:]
         Δt = (ν[2][end] - ν[1][end])
-        dt = Δt*dtdir
+        dt = Δt*dtdir |>mp.dev
         global ls = 0.0
         Flux.reset!(pipe)
         
@@ -623,25 +623,29 @@ for epoch = 1:10
         #    sum(Flux.Losses.mse.([model(x)[1] for x ∈ X[2:end]], Y[2:end]))
             # ls = 0
             pinn = m.layers[2]
-            out = m.([(pxy[:,:,i:i+timebatch-1],ν[:, i:i+timebatch-1]) for i=1:nsamps-timebatch+1])
+            out  = m.([(pxy[:,:,i:i+timebatch-1],ν[:, i:i+timebatch-1]) for i=1:nsamps-timebatch+1])
+            xy   = hcat([a for (a,b) in out]...)#[:,1:2:end]
+            yhat = hcat([b for (a,b) in out]...)
             # me = Flux.mse(y.^2, 0.0)
-            lat = [vcat(out[i][1][:,2], ν[:,i]) for i= 1:nsamps-timebatch+1]
-            ts =  [[lat[i] lat[i+1]] for i=1:nsamps-timebatch]
+            lat = vcat(xy, repeat(ν, inner=(1,2))[:,2:end-1])
+            # lat = reshape(lat, (size(lat)[1], timebatch, size(lat)[2]÷timebatch))
+            
           
-            ddx = [(pinn((ts[i] .+ dx)') - pinn((ts[i] .- dx)'))/(2ϵ)  for i=1:nsamps-timebatch]
-            ddy = [(pinn((ts[i] .+ dy)') - pinn((ts[i] .- dy)'))/(2ϵ)  for i=1:nsamps-timebatch]
-            ddt = [(pinn((ts[i] .+ dt)') - pinn((ts[i] .- dt)'))./(2*Δt) for i=1:nsamps-timebatch]
+            ddx = hcat([(pinn((lat[:,i*2+1:i*2+2] .+ dx)') - pinn((lat[:,i*2+1:i*2+2] .- dx)'))/(2ϵ)    for i=0:nsamps-timebatch]...)
+            ddy = hcat([(pinn((lat[:,i*2+1:i*2+2] .+ dy)') - pinn((lat[:,i*2+1:i*2+2] .- dy)'))/(2ϵ)    for i=0:nsamps-timebatch]...)
+            ddt = hcat([(pinn((lat[:,i*2+1:i*2+2] .+ dt)') - pinn((lat[:,i*2+1:i*2+2] .- dt)'))./(2*Δt) for i=0:nsamps-timebatch]...)
             # # # #approximate the Unsteady Bernoulli's equation
             # # # ∂ν/∂t + ν ∇⋅(ν) + |∇ν|^2 + P_ish = 0
-            bern = [ddt[i][1] .+ (ddx[i][1].^2 .+ ddy[i][1].^2) .+ out[i][2][2] for i=1:nsamps-timebatch]
+            bern = ddt[1,:] .+ (ddx[1,:].^2 .+ ddy[1,:].^2) .+ yhat[2,:]
             # bern = y[1,:].^2/2.0 + y[2,:]
             be = Flux.mse(bern, 0.0)            
             # # # then forces are equal to 
             # # # 0 = -Pish⋅n⋅dS
-            ct = errorL2([-out[i][1][1,2].*out[i][2][2] for i=1:nsamps-timebatch], thrst[timebatch+1:end])
-            cl = errorL2([-out[i][1][2,2].*out[i][2][2] for i=1:nsamps-timebatch], lift[timebatch+1:end] )
-            Γe = errorL2([o[2][3] for o in out], Γ[timebatch:end])                
-            ls = be + Γe
+            
+            ct = errorL2(-xy[1,1:2:end].*yhat[2,:] , thrst[timebatch:end])
+            cl = errorL2(-xy[2,1:2:end].*yhat[2,:] , lift[timebatch:end])
+            Γe = errorL2(yhat[3,:], Γ[timebatch:end])                
+            ls = ct + cl + be + Γe
             
         end
         Flux.update!(pinnstate, pipe, grads[1])
@@ -652,6 +656,15 @@ for epoch = 1:10
         println("Epoch: $epoch, Loss: $(pinnlosses[end])")
     end
 end
+
+
+tiledν   = repeat(ν, inner=(1,timebatch))
+tiledpxy = repeat(pxy, inner=(1,1,timebatch))
+out = vcat(trunk(tiledpxy),tiledν)
+tt =  @view out[:,2:end-1]
+# tt = reshape(tt, (size(tt)[1], timebatch , size(tt)[2]÷timebatch))
+tt = reshape(tt, (timebatch, size(tt)[1], size(tt)[2]÷timebatch))
+PINN(tt)
 
 pinnlosses = []
 for epoch = 1:10

@@ -318,8 +318,8 @@ function load_perfNN(;perf="perf_L64.jld2")
 end
 
 function save_state(mp)
-    layer = join(["$(layer)-" for layer in mp.layers])[1:end-2]
-    μ = "μAE_L$(layer).jld2"
+    layer = join(["$(layer)_" for layer in mp.layers])[1:end-2]
+    μ = "P_AE_L$(layer).jld2"
     bdnn = "B_DNN_L$(layer).jld2"
     l = "L_L$(layer).jld2"
     perf = "perf_L$(layer).jld2"
@@ -339,7 +339,7 @@ end
 
 function make_plots_and_save(mp, dataloader, latentdata, convNN, μAE, B_DNN, L, perfNN, Glosses, μlosses, blosses, convNNlosses)
 
-    dir_name = join(["$(layer)-" for layer in mp.layers])[1:end-2]
+    dir_name = join(["$(layer)_" for layer in mp.layers])[1:end-2]
     dir_path = joinpath("images", dir_name)
 
     if !isdir(dir_path)
@@ -430,7 +430,7 @@ function make_plots_and_save(mp, dataloader, latentdata, convNN, μAE, B_DNN, L,
     savefig(joinpath(dir_path,"losses"*join(["$(layer)->" for layer in mp.layers])[1:end-2]*".png"))
 end
 
-layers = [[64,32,16]]
+layers = [[64,32,16,8]]
         #   [64,64,64],
         #   [64,64,32],
         #   [64,32,16],
@@ -441,7 +441,7 @@ layers = [[64,32,16]]
 
 for layer in layers            
     @show layer
-    mp = ModelParams(layer,  0.01, 5, 128, errorL2, cpu)
+    mp = ModelParams(layer,  0.001, 100, 4096, errorL2, gpu)
     bAE, μAE, convNN, perfNN = build_networks(mp)
     μstate, bstate, convNNstate, perfNNstate = build_states(mp, bAE, μAE, convNN, perfNN)
     dataloader = build_dataloaders(mp)
