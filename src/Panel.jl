@@ -212,23 +212,3 @@ function edge_to_body(foil::Foil, flow::FlowParams)
     ps = foil.edge[:, 1:2]
     vortex_to_target(ps, foil.col, Γs, flow)
 end
-
-<p>Image 1</p>
-<img id="161284263" src="/courses/2309316/files/161284263/preview" alt="0001.png" width="400" height="398" /> 
-<p>Image 2</p>
-<img id="161284266" src="/courses/2309316/files/161284266/preview" alt="0003.png"  width="400"/> 
-<p>Image 3</p>
-<img id="161284268" src="/courses/2309316/files/161284268/preview" alt="0004.png" width="400" />
-<p>Image 4</p>
-<p>Image 5</p><img id="161284269" src="/courses/2309316/files/161284269/preview" alt="0005.png"  width="400"/> 
-<p>Image 6</p><img id="161284270" src="/courses/2309316/files/161284270/preview" alt="0006.png"  width="400"/> 
-<p>Image 7</p><img id="161284271" src="/courses/2309316/files/161284271/preview" alt="0007.png"  width="400"/> 
-<p>Image 8</p><img id="161284272" src="/courses/2309316/files/161284272/preview" alt="0008.png"  width="400"/> 
-<p>Image 9</p><img id="161284273" src="/courses/2309316/files/161284273/preview" alt="0009.png"  width="400"/> 
-<p>Image 10</p><img id="161284274" src="/courses/2309316/files/161284274/preview" alt="0010.png"  width="400"/> 
-<p>Image 11</p><img id="161284276" src="/courses/2309316/files/161284276/preview" alt="0011.png"  width="400"/> 
-<p>Image 12</p><img id="161284277" src="/courses/2309316/files/161284277/preview" alt="0012.png"  width="400"/> 
-<p>Image 13</p><img id="161284278" src="/courses/2309316/files/161284278/preview" alt="0013.png"  width="400"/> 
-<p>Image 14</p><img id="161284279" src="/courses/2309316/files/161284279/preview" alt="0014.png"  width="400"/> 
-<p>Image 15</p><img id="161284280" src="/courses/2309316/files/161284280/preview" alt="15.jpg"  width="400"/> 
-<p>Image 16</p><img id="161284281" src="/courses/2309316/files/161284281/preview" alt="16.JPG"  width="400"/>

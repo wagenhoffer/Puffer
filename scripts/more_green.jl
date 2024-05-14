@@ -39,31 +39,46 @@ function build_dataloaders(mp::ModelParams; data_file="single_swimmer_ks_0.35_2.
     RHS = hcat(data[:, :RHS]...).|>Float32
     μs  = hcat(data[:, :μs]...).|>Float32
     P   = vcat(data[:, :pressure]...).|>Float32
-
+    low = -5000
+    high = -low
+    these = low .< (data[:,:reduced_freq] ./ data[:,:k] ) .< high
+    count = sum(these)
     N = mp.layers[1]
     
     pad = 2
-    inputs = zeros(Float32, N + pad*2, 2, 4, size(data,1))
+    inputs = zeros(Float32, N + pad*2, 2, 4, count)
     
-    for (i,row) in enumerate(eachrow(data))       
-        position = row.position .- minimum(row.position, dims=2) 
-    
-        x_in = [position' row.normals' row.wake_ind_vel' row.panel_vel' ]    
-        x_in = vcat(x_in[end-pad+1:end,:,:,:],x_in,x_in[1:pad,:,:,:])
-        x_in = reshape(x_in, size(x_in,1), 2, size(x_in, 2) ÷ 2, 1) #shape the data to look like channels
-        inputs[:,:,:,i] = x_in
+    i = 1
+    for row in eachrow(data)
+        if low < row.reduced_freq / row.k < high
+            position = row.position .- minimum(row.position, dims=2) 
+        
+            x_in = [position' row.normals' row.wake_ind_vel' row.panel_vel' ]    
+            x_in = vcat(x_in[end-pad+1:end,:,:,:],x_in,x_in[1:pad,:,:,:])
+            x_in = reshape(x_in, size(x_in,1), 2, size(x_in, 2) ÷ 2, 1) #shape the data to look like channels
+            inputs[:,:,:,i] = x_in
+            i += 1
+        end
     end
 
     #force, lift, thrust, power 
-    perfs = zeros(4, size(data,1))
+    # perfs = zeros(4, size(data,1))
+    perfs = zeros(4, count)
     ns = coeffs[1,:coeffs]|>size|>last
-    for (i,r) in enumerate(eachrow(coeffs))
-        # perf =  r.reduced_freq < 1 ? r.coeffs : r.coeffs ./ (r.reduced_freq^2/r.k)
+    i = 1
+    motions = []
+    for r in eachrow(coeffs)
+        # perf =  r.reduced_freq < 1 ? r.coeffs : r.coeffs ./ (r.reduced_freq^2/r.k)        
         # perfs[:,ns*(i-1)+1:ns*i] = perf
-        perfs[:,ns*(i-1)+1:ns*i] = r.coeffs
+        if low < r.reduced_freq / r.k < high
+            perfs[:,ns*(i-1)+1:ns*i] = r.coeffs
+            push!(motions, (r.wave,r.reduced_freq,r.k))
+            i += 1
+        end
+        # perfs[:,ns*(i-1)+1:ns*i] = r.coeffs
     end
 
-    dataloader = DataLoader((inputs=inputs, RHS=RHS, μs=μs, perfs=perfs, P=P'), batchsize=mp.batchsize, shuffle=true)    
+    dataloader = DataLoader((inputs=inputs, RHS=RHS[:,findall(these)], μs=μs[:,findall(these)], perfs=perfs, P=P[findall(these), :]'), batchsize=mp.batchsize, shuffle=true)    
 end
 
 # W, H, C, Samples = size(dataloader.data.inputs)
@@ -86,9 +101,12 @@ function build_networks(mp; C = 4, N = 64)
     bAE = build_ae_layers(mp.layers) |> mp.dev
     μAE = build_ae_layers(mp.layers) |> mp.dev
     convNN = SkipConnection(Chain(convenc, convdec), .+)|>mp.dev
-    perfNN = Chain(Dense(mp.layers[end],mp.layers[end],Flux.tanh),
+    perfNN = Chain( Conv((2,1), 2=>2, Flux.tanh, pad=SamePad()),
+                Conv((2,1), 2=>1, pad = SamePad()),
+                Flux.flatten,   
                 Dense(mp.layers[end],mp.layers[end],Flux.tanh),
-                Dense(mp.layers[end],3,Flux.tanh))|>mp.dev               
+                Dense(mp.layers[end],mp.layers[end],Flux.tanh),
+                Dense(mp.layers[end],3))|>mp.dev               
 
    bAE, μAE, convNN, perfNN
 end
@@ -113,6 +131,8 @@ function train_AEs(dataloader, convNN, convNNstate, μAE, μstate, bAE, bstate, 
             grads = Flux.gradient(convNN) do m
                 # Evaluate model and loss inside gradient context:                
                 ls = errorL2(m(x), x)  
+                #TODO: increase the weight on the latent space loss
+                # the resnet is not learning the latent space well
                 latent = errorL2(m.layers[1](x),y)
                 ls += latent
             end
@@ -207,12 +227,12 @@ function build_L_with_data(mp, dataloader, μAE, B_DNN)
     L, Lstate, latentdata    
 end
 
-function train_L(L, Lstate, latentdata, mp, B_DNN, μAE;ϵ=1e-3, linearsamps=100)    
+function train_L(L, Lstate, latentdata, mp, B_DNN, μAE;ϵ=1e-3, linearsamps=128)    
     Glosses = []
     kick = false
     e3 = e2 = e4 = 0.0
     for epoch = 1:mp.epochs
-        for (ν, β, μ, B,_) in latentdata
+        for (ν, β, μ, B, _) in latentdata
             # (ν, β, μ, B) =  first(latentdata)
             ν = ν |> mp.dev
             β = β |> mp.dev
@@ -234,7 +254,7 @@ function train_L(L, Lstate, latentdata, mp, B_DNN, μAE;ϵ=1e-3, linearsamps=100
                 e2 = 0.0
 
                 
-                for _ = 1:linearsamps      
+                for ind = 1:linearsamps      
                     ind = rand(1:size(β,2))
                     superβ = β + circshift(β, (0, ind))
                     superν = ν + circshift(ν, (0, ind))
@@ -269,11 +289,16 @@ function train_L(L, Lstate, latentdata, mp, B_DNN, μAE;ϵ=1e-3, linearsamps=100
     Glosses
 end
 
+
 function train_perfNN(latentdata, perfNN, perfNNstate, mp)
     perflosses = []
+    
     for epoch = 1:mp.epochs
-        for (ν,_,μs,_,perf) in latentdata
+        for (ν,βs,μs,_,perf) in latentdata
             ν = ν |> mp.dev
+            βs = βs |> mp.dev
+            image = permutedims(cat(ν, βs, dims=3), (1,3,2))
+            image = reshape(image, (1, size(image)...))
             lift = perf[2,:] |> mp.dev
             thrust = perf[3,:] |> mp.dev
             Γs = μs |> mp.dev
@@ -281,11 +306,11 @@ function train_perfNN(latentdata, perfNN, perfNNstate, mp)
             ls = 0.0
             grads = Flux.gradient(perfNN) do m
                 # Evaluate model and loss inside gradient context:
-                y = m(ν)
+                y = m(image)
                 ls = errorL2(y[1,:], lift) #lift
-                ls +=  errorL2(y[2,:], thrust)#thrust  
+                ls +=  10*errorL2(y[2,:], thrust)#thrust  
                 ls += errorL2(y[3,:], Γs)             
-                # ls = errorL2(y,[lift'; thrust'; Γs'])
+             
             end
             Flux.update!(perfNNstate, perfNN, grads[1])
             push!(perflosses, ls)  # logging, outside gradient context
@@ -296,6 +321,7 @@ function train_perfNN(latentdata, perfNN, perfNNstate, mp)
     end
     perflosses
 end
+
 
 function load_AEs(;μ="μAE.jld2", bdnn="B_DNN.jld2")
     path = joinpath("data", μ)
@@ -433,12 +459,14 @@ function make_plots_and_save(mp, dataloader, latentdata, convNN, μAE, B_DNN, L,
 end
 
 layers = [[64,32,16,8]]
-          [64,64,64],
-          [64,64,32],
-          [64,32,16],
-          [64,64,16],          
-          [64,32,16,8,4],
-          [64,32,16,8,4,2]]
+
+[[64,32,16,8]]
+        #   ,
+        #   [64,64,32],
+        #   [64,32,16],
+        #   [64,64,16],          
+        #   [64,32,16,8,4],
+        #   [64,32,16,8,4,2]]
 
 
 for layer in layers            
@@ -451,11 +479,11 @@ for layer in layers
     B_DNN,(convNNlosses, μlosses, blosses) = train_AEs(dataloader, convNN, convNNstate, μAE, μstate, bAE, bstate, mp; ϵ=1e-4)
     @show "Train L"
     L, Lstate, latentdata = build_L_with_data(mp, dataloader, μAE, B_DNN)
-    Glosses = train_L(L, Lstate, latentdata, mp, B_DNN, μAE)
+    [Glosses = train_L(L, Lstate, latentdata, mp, B_DNN, μAE) for i=1:5]
     @show "Train perfNN"
     perflosses = train_perfNN(latentdata, perfNN, perfNNstate, mp)
     @show "Save State and Make Plots $layer"
-    save_state(mp)
+    # save_state(mp)
     make_plots_and_save(mp, dataloader, latentdata, convNN, μAE, B_DNN, L, perfNN, Glosses, μlosses, blosses, convNNlosses)
 end
 begin
@@ -472,7 +500,7 @@ begin
     L, Lstate, latentdata = build_L_with_data(mp, dataloader, μAE, B_DNN)
     load_L(;l="L_L$(layerstr).jld2")
     @show "Train perfNN"
-    # perflosses = train_perfNN(latentdata, perfNN, perfNNstate, mp)
+    perflosses = train_perfNN(latentdata, perfNN, perfNNstate, mp)
 end
 
 # plot(latentdata.data.perfs[2,:])
@@ -518,6 +546,40 @@ begin
     coeffs_file= "single_swimmer_coeffs_ks_0.35_2.0_fs_0.25_4.0_ang_car.jls"
     data = deserialize(joinpath("data", data_file))
     coeffs = deserialize(joinpath("data", coeffs_file))
+        # load/ prep  training data
+        data = deserialize(joinpath("data", data_file))
+        coeffs = deserialize(joinpath("data", coeffs_file))
+       
+        RHS = hcat(data[:, :RHS]...).|>Float32
+        μs  = hcat(data[:, :μs]...).|>Float32
+        P   = vcat(data[:, :pressure]...).|>Float32
+    
+        N = mp.layers[1]
+        
+        pad = 2
+        inputs = zeros(Float32, N + pad*2, 2, 4, size(data,1))
+        
+        for (i,row) in enumerate(eachrow(data))       
+            position = row.position .- minimum(row.position, dims=2) 
+        
+            x_in = [position' row.normals' row.wake_ind_vel' row.panel_vel' ]    
+            x_in = vcat(x_in[end-pad+1:end,:,:,:],x_in,x_in[1:pad,:,:,:])
+            x_in = reshape(x_in, size(x_in,1), 2, size(x_in, 2) ÷ 2, 1) #shape the data to look like channels
+            inputs[:,:,:,i] = x_in
+        end
+    
+        #force, lift, thrust, power 
+        perfs = zeros(4, size(data,1))
+        ns = coeffs[1,:coeffs]|>size|>last
+
+        for (i,r) in enumerate(eachrow(coeffs))
+            # perf =  r.reduced_freq < 1 ? r.coeffs : r.coeffs ./ (r.reduced_freq^2/r.k)
+            # perfs[:,ns*(i-1)+1:ns*i] = perf
+            perfs[:,ns*(i-1)+1:ns*i] = r.coeffs
+
+        end
+    
+        dataloader = DataLoader((inputs=inputs, RHS=RHS, μs=μs, perfs=perfs, P=P'), batchsize=mp.batchsize, shuffle=true)    
 end
 forces = coeffs[:,:coeffs]
 which = rand(1:200)
@@ -526,7 +588,10 @@ full_sim = ns*which+1:ns*(which+1)
 # latentdata.data.νs[:,full_sim]
 clts = zeros(2,ns-1,200)
 νembs = zeros(mp.layers[end]+1,ns-1,200)|>cpu
-allnus = B_DNN.layers[1:2](inputs[:,:,:,:]|>mp.dev)|>cpu
+
+allbetas = B_DNN.layers[1:2](inputs[:,:,:,:]|>mp.dev)|>cpu
+allnus = μAE[:encoder](dataloader.data.μs|>mp.dev)|>cpu
+approxnus = hcat([G*b for b in eachcol(allbetas)]...)
 pos = zeros(Float32, 64,2, (ns -1), 200)
 μtrim = zeros(Float32, 64, (ns-1),200)
 for i=0:199
@@ -534,6 +599,7 @@ for i=0:199
     times = data[full_sim,:t]
     # times = times .- times[1]
     times = times .% times[101]
+    times .-= times[1]
     # poss = data[full_sim,:position]
     normals = data[full_sim,:normals]
     nx = map(normal->mean(normal[1,:]), normals)
@@ -553,11 +619,11 @@ pinndata = DataLoader((νs=νembs.|>Float32, clts=clts.|>Float32, pos = pos.|>Fl
 
 test = collect(Iterators.take(pinndata,1000))
 
-plot()
-for t in test[900:1000]
-    plot!(t.clts[2,:]  , label="")
-end
-plot!()
+# plot()
+# for t in test[900:1000]
+#     plot!(t.clts[2,:]  , label="")
+# end
+# plot!()
 
 
 
@@ -571,10 +637,10 @@ nuext = nusize + 3 #x,y,t1
 #idea - batch up sequences -> output 3x1 of latent space nu P Γ
 timebatch = 2
 PINN = Chain(GRU(timebatch => 1),
-            x-> transpose(x),
+            x-> permutedims(x),
             Dense(nuext, nuext, tanh),             
             Dense(nuext, 3))|>mp.dev                         
-
+        
 ts = 55
 trunk = Chain(Conv((4,), 2=>2, Flux.tanh),
               Conv((4,), 2=>2, Flux.tanh),
@@ -627,13 +693,12 @@ for epoch = 1:10
             xy   = hcat([a for (a,b) in out]...)#[:,1:2:end]
             yhat = hcat([b for (a,b) in out]...)
             # me = Flux.mse(y.^2, 0.0)
-            lat = vcat(xy, repeat(ν, inner=(1,2))[:,2:end-1])
-            # lat = reshape(lat, (size(lat)[1], timebatch, size(lat)[2]÷timebatch))
+            lat = reshape(vcat(xy, repeat(ν, inner=(1,2))[:,2:end-1]), (nuext,timebatch,nsamps-1))
             
-          
-            ddx = hcat([(pinn((lat[:,i*2+1:i*2+2] .+ dx)') - pinn((lat[:,i*2+1:i*2+2] .- dx)'))/(2ϵ)    for i=0:nsamps-timebatch]...)
-            ddy = hcat([(pinn((lat[:,i*2+1:i*2+2] .+ dy)') - pinn((lat[:,i*2+1:i*2+2] .- dy)'))/(2ϵ)    for i=0:nsamps-timebatch]...)
-            ddt = hcat([(pinn((lat[:,i*2+1:i*2+2] .+ dt)') - pinn((lat[:,i*2+1:i*2+2] .- dt)'))./(2*Δt) for i=0:nsamps-timebatch]...)
+            # lat = reshape(lat, (size(lat)[1], timebatch, size(lat)[2]÷timebatch))                    
+            ddx = hcat([(pinn((lat[:,:,i] .+ dx)') - pinn((lat[:,:,i] .- dx)'))./(2ϵ)    for i=1:nsamps-timebatch+1]...)
+            ddy = hcat([(pinn((lat[:,:,i] .+ dy)') - pinn((lat[:,:,i] .- dy)'))./(2ϵ)    for i=1:nsamps-timebatch+1]...)
+            ddt = hcat([(pinn((lat[:,:,i] .+ dt)') - pinn((lat[:,:,i] .- dt)'))./(2*Δt)  for i=1:nsamps-timebatch+1]...)
             # # # #approximate the Unsteady Bernoulli's equation
             # # # ∂ν/∂t + ν ∇⋅(ν) + |∇ν|^2 + P_ish = 0
             bern = ddt[1,:] .+ (ddx[1,:].^2 .+ ddy[1,:].^2) .+ yhat[2,:]
@@ -657,6 +722,8 @@ for epoch = 1:10
     end
 end
 
+
+ reshape(vcat(xy, repeat(ν, inner=(1,2))[:,2:end-1]), (11,2,99))
 
 tiledν   = repeat(ν, inner=(1,timebatch))
 tiledpxy = repeat(pxy, inner=(1,1,timebatch))
@@ -751,8 +818,9 @@ begin
     ns = 501
     Flux.reset!(pipe)
     slice = ns*which+1:ns*(which+1)-1 #ns*i+1:ns*(i+1) - 1
-    samp = pinndata.data.νs[:,slice]
-    spxy = pinndata.data.pos[:,:,slice]
+            # ns*i+1:ns*(i+1) - 1
+    samp = pinndata.data.νs[:,slice]|>mp.dev
+    spxy = pinndata.data.pos[:,:,slice]|>mp.dev
     Γs = pinndata.data.μs[1,slice] - pinndata.data.μs[end,slice]
     xy, out = pipe(spxy,samp)
     nuh = out[1,:]
@@ -773,3 +841,260 @@ begin
     plot(a,b,c,d, layout = (4,1), size = (1200,800))
 
 end
+
+
+otherdata= DataLoader((νs=νembs, clts=clts, pos = pos, μs = μtrim), batchsize=4096, shuffle=true)
+
+opinn = Chain(Dense(nuext,nuext,tanh),
+              Dense(nuext,nuext,tanh),
+              Dense(nuext,3))|>gpu  
+flatter = Chain(Conv((4,), 2=>2, Flux.tanh, pad=SamePad()),                
+        Conv((4,), 2=>2, Flux.tanh),
+        AdaptiveMeanPool((32,)),
+        Conv((4,), 2=>2, Flux.tanh),
+        AdaptiveMeanPool((16,)),                        
+        x->reshape(x,(size(x,1)*size(x,2), size(x,3))),
+        Dense(N÷2=>N÷2, Flux.tanh),
+        Dense(N÷2=>N÷2, Flux.tanh),
+        Dense(N÷2=>2))  |>mp.dev
+flatter(pos[:,:,1:2]|>gpu)  
+mlp = PairwiseFusion(vcat, flatter, opinn)
+mlp(pos[:,:,1:2]|>gpu, νembs[:,1:2]|>gpu)[2]
+ostate = Flux.setup(Adam(0.001), mlp)
+            
+olosses = []
+for epoch = 1:1000
+    # @show epoch
+    for (ν,lt,pxy,mus) in otherdata
+        ν = ν|>mp.dev
+        lift  = lt[1,:] |> mp.dev
+        thrst = lt[2,:] |> mp.dev
+        pxy = pxy |> mp.dev
+        mus = mus |>mp.dev
+        Γ = mus[1,:] - mus[end,:]
+
+
+        global los = 0.0        
+        nsamps = size(ν,2)
+
+        grads = Flux.gradient(mlp) do m
+            # Evaluate model and loss inside gradient context:
+            # ls = 0
+            
+            xy, out = m(pxy,ν)     
+
+            ct = errorL2(-xy[1,:].*out[1,:], thrst)
+            cl = errorL2(-xy[2,:].*out[2,:], lift)
+            Γe = errorL2(out[3,:], Γ)                
+            los = ct + cl +  Γe
+            
+        end
+        Flux.update!(ostate, mlp, grads[1])
+        push!(olosses, los)  # logging, outside gradient context
+    end
+
+    if epoch % 10 == 0
+        println("Epoch: $epoch, Loss: $(olosses[end])")
+    end
+end
+
+
+begin
+    which = rand(1:199)
+    ns = 500
+   
+    slice = ns*which+1:ns*(which+1)-1 #ns*i+1:ns*(i+1) - 1
+            # ns*i+1:ns*(i+1) - 1
+    samp = pinndata.data.νs[:,slice]
+    spxy = pinndata.data.pos[:,:,slice]
+    Γs = pinndata.data.μs[1,slice] - pinndata.data.μs[end,slice]
+    xy, out = mlp(spxy|>gpu,samp|>gpu)
+
+    x = xy[1,:]
+    y = xy[2,:]
+
+    @show data[slice[1], [:k,:reduced_freq]]
+    plot(pinndata.data.clts[1,ns*which+1:ns*(which+1)], label="Truth",lw=4)
+    a = plot!(-xy[2,:].*out[2,:], label="Approx", marker=:circle, ms=1)
+    title!("Lift")
+    plot(pinndata.data.clts[2,ns*which+1:ns*(which+1)], label="Truth",lw=4)
+    b = plot!(-xy[1,:].*out[1,:], label="Approx", marker=:circle, ms=1)
+    title!("Thrust")
+    plot(x, label="x")
+    c = plot!(y, label="y", lw= 0 , marker=:circle, ms=2)
+    plot(Γs, label="Γ Truth",lw=4)
+    d = plot!(out[3,:], label="Approx", marker=:circle, ms=1)
+    
+    plot(a,b,c,d, layout = (4,1), size = (1200,800))
+
+end
+
+begin
+    # which = rand(1:199)
+    # ns = 500
+   
+    slice = ns*which+1:ns*(which+1)-1 #ns*i+1:ns*(i+1) - 1
+
+    samp = pinndata.data.νs[:,slice]
+    spxy = pinndata.data.pos[:,:,slice]
+    xy, out = mlp(spxy|>gpu,samp|>gpu)
+    nuh = out[1,:]
+    ph  = out[2,:]
+    xm,ym = maximum([v for v in  eachcol(xy)])
+    x = xy[1,:] .- xm
+    y = xy[2,:] .- ym
+    body = pos[:,:,slice]
+    movie = @animate  for i=1:ns-1
+        plot(body[:,1,i],body[:,2,i], label="", aspect_ratio=:equal)
+        plot!(x,y,label="")
+        plot!(x[i:i],y[i:i], ms=10, marker=:circle, label="", aspect_ratio=:equal)
+        title!("$(i%100)")
+    end
+    gif(movie, "test.gif", fps = 30)
+    
+end
+
+
+
+
+###start with a cnn to try and get the force data and Γ from full data space
+C = 4
+N = 16
+bigM = Chain(Conv((4,2), C=>C, Flux.tanh, pad=SamePad()),                
+                Conv((5,1), C=>C, Flux.tanh),
+                MeanPool((2,1)),                
+                Conv((1,2), C=>1, Flux.tanh), 
+                MeanPool((2,1)),
+                x->reshape(x,(size(x,1), size(x,4))),
+                Dense(N=>N, Flux.tanh),
+                Dense(N=>N, Flux.tanh),
+                Dense(N=>3))  |>mp.dev
+
+dl = dataloader|>first
+bigM(dl.inputs|>mp.dev)
+
+bigMstate = Flux.setup(Adam(0.01), bigM)
+
+bigMlosses = []
+for epoch = 1:1_000
+    # @show epoch
+    for (inputs,_,mus,lt,_) in dataloader
+        inputs = inputs |>mp.dev
+        lift  = lt[2,:] |> mp.dev
+        thrst = lt[3,:] |> mp.dev                
+        mus   = mus |>mp.dev
+        Γ = mus[1,:] - mus[end,:]       
+        los = 0.0                         
+        grads = Flux.gradient(bigM) do m            
+            y = m(inputs)     
+            ct = errorL2(y[1,:], thrst)
+            cl = errorL2(y[2,:], lift)
+            Γe = errorL2(y[3,:], Γ)                
+            los = ct + cl +  Γe            
+        end
+        Flux.update!(bigMstate, bigM, grads[1])
+        push!(bigMlosses, los)  # logging, outside gradient context
+    end
+
+    if epoch % 10 == 0
+        println("Epoch: $epoch, Loss: $(bigMlosses[end])")
+    end
+end
+
+begin
+    which = rand(1:199)
+    ns = 501
+   
+    slice = ns*which+1:ns*(which+1)-1 #ns*i+1:ns*(i+1) - 1
+            # ns*i+1:ns*(i+1) - 1
+    @show data[slice[1], [:k,:reduced_freq]]
+    # @show data[slice[end], [:k,:reduced_freq]]
+    spxy = inputs[:,:,:,slice]
+    Γs = μs[1,slice] - μs[end,slice]
+    y = bigM(spxy|>mp.dev)
+    
+    plot(perfs[2,ns*which+1:ns*(which+1)], label="Truth",lw=4)
+    a = plot!(y[2,:], label="Approx", marker=:circle, ms=1)
+    title!("Lift")
+    plot(perfs[3,ns*which+1:ns*(which+1)], label="Truth",lw=4)
+    b = plot!(y[1,:], label="Approx", marker=:circle, ms=1)
+    title!("Thrust")
+
+    c = plot(y[3,:], label="Γ approx", lw= 0 , marker=:circle, ms=2)
+    plot!(Γs, label="Γ Truth",lw=4)
+    
+    
+    plot(a,b,c, layout = (3,1), size = (1200,800))
+
+end
+
+
+begin
+    #the above gave crap, why? 
+    #lets explore the data
+    n  = data[slice,:normals]
+    p  = data[slice,:position]
+    pv = data[slice,:panel_vel]
+    iv = data[slice,:wake_ind_vel]
+    pr = data[slice,:pressure]
+
+    movie = @animate for i = 1:500
+        a = quiver(p[i][1,:],p[i][2,:], quiver=(iv[i][1,:],iv[i][2,:]), label="")        
+        b = plot(p[i][1,:],pr[i][:], label="")
+        plot(a,b, layout = (2,1))
+    end
+    gih = gif(movie, "test.gif", fps = 30)
+end
+
+for i = 1:5
+    perflosses = train_perfNN(latentdata, perfNN, perfNNstate, mp)
+end
+
+begin
+
+    which = rand(1:29)
+    ns = 501
+   
+
+    (ν,βs,μs,_,perf) = latentdata.data
+    image = permutedims(cat(ν, βs, dims=3), (1,3,2))
+    image = reshape(image, (1, size(image)...))
+    lift = perf[2,:] 
+    thrust = perf[3,:] 
+    Γs = μs 
+    Γs = Γs[1,:] - Γs[end,:]
+        
+    y = perfNN(image|>gpu)|>cpu
+            # Evaluate model and loss inside gradient context:
+            
+    lifte   = errorL2(y[1,:], lift) #lift
+    thruste = errorL2(y[2,:], thrust)#thrust  
+    gammae  = errorL2(y[3,:], Γs)             
+    @show (lifte, thruste, gammae)
+    le = []
+    te = []
+    ge = []
+    for i = 1:29
+        slice = ns*i+1:ns*(i+1)-1 
+        push!(le, errorL2(y[1,slice], lift[slice]))
+        push!(te, errorL2(y[2,slice], thrust[slice]))
+        push!(ge, errorL2(y[3,slice], Γs[slice])   )
+    end
+
+    slice = ns*which+1:ns*(which+1)-1 
+    # @show k,r = data[slice[1], [:k,:reduced_freq]]
+    plot(lift[slice])
+    a = plot!(y[1,slice])
+    plot(thrust[slice])
+    b = plot!(y[2,slice])
+    plot(Γs[slice])
+    c = plot!(y[3,slice])
+    plot(a,b,c, layout = (3,1), size = (1200,800))
+    # title!("k: $k, r: $r")
+
+end
+    plot(le, label="Lift")
+    plot!(te, label="Thrust")
+    plot!(ge, label="Γ")
+
+ 

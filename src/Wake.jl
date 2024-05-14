@@ -79,7 +79,7 @@ end
 # if CUDA.functional()
 #     vortex_to_target(sources, targets, Γs, flow) where {T <: Real} = cast_and_pull(sources, targets, Γs,flow)
 # else?
-vortex_to_target(sources, targets, Γs, flow) where {T <: Real} = cpu_vortex_to_target(sources, targets, Γs, flow)
+vortex_to_target(sources, targets, Γs, flow)  = cpu_vortex_to_target(sources, targets, Γs, flow)
 # end
 
 
