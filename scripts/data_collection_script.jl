@@ -36,7 +36,7 @@ begin
                 ang = deepcopy(defaultDict)
                 ang[:N] = 64
                 ang[:Nt] = 100
-                ang[:Ncycles] = 6 # number of cycles
+                ang[:Ncycles] = 7 # number of cycles
                 ang[:Uinf] = 1.0
                 ang[:f] = reduced_freq * ang[:Uinf]
                 ang[:kine] = wave
@@ -80,42 +80,29 @@ begin
                     coeffs[:,i] = get_performance(foil, flow, p)
                     old_mus = [foil.μs'; old_mus[1:2, :]]
                     old_phis = [phi'; old_phis[1:2, :]]
+                    df = datas = DataFrame(reduced_freq = [reduced_freq],
+                                            k = [k],
+                                            U_inf = [flow.Uinf],
+                                            t = [flow.n * flow.Δt],
+                                            σs = [deepcopy(foil.σs)],
+                                            panel_vel = [deepcopy(foil.panel_vel)],
+                                            position = [deepcopy(foil.col)],
+                                            normals = [deepcopy(foil.normals)],
+                                            wake_ind_vel = [deepcopy(foil.wake_ind_vel)],
+                                            tangents = [deepcopy(foil.tangents)],
+                                            μs = [deepcopy(foil.μs)],
+                                            pressure = [deepcopy(p)], 
+                                            RHS = [deepcopy(rhs)])
 
-                    if i == ang[:Nt] #skip first cycle
-                        datas = DataFrame(reduced_freq = [reduced_freq],
-                            k = [k],
-                            U_inf = [flow.Uinf],
-                            t = [flow.n * flow.Δt],
-                            σs = [foil.σs],
-                            panel_vel = [foil.panel_vel],
-                            position = [foil.col],
-                            normals = [foil.normals],
-                            wake_ind_vel = [foil.wake_ind_vel],
-                            tangents = [foil.tangents],
-                            μs = [foil.μs],
-                            pressure = [p], 
-                            RHS = [rhs])
-
-                    elseif i > ang[:Nt] 
-                        append!(datas,
-                            DataFrame(reduced_freq = [reduced_freq],
-                                k = [k],
-                                U_inf = [flow.Uinf],
-                                t = [flow.n * flow.Δt],
-                                σs = [foil.σs],
-                                panel_vel = [foil.panel_vel],
-                                position = [foil.col],
-                                normals = [foil.normals],
-                                wake_ind_vel = [foil.wake_ind_vel],
-                                tangents = [foil.tangents],
-                                μs = [foil.μs],
-                                pressure = [p],
-                                RHS = [rhs]))
+                    if i <= ang[:Nt] * 2 + 1#skip first 2 cycles
+                        data = df
+                    elseif i > ang[:Nt] * 2 + 1
+                        append!(datas,df)
                     end
                 end
 
                 push!(allofit, datas)
-                push!(allCoeffs, DataFrame(wave = [wave], reduced_freq = [reduced_freq], k = [k], coeffs = [coeffs[:,ang[:Nt]:end]]))
+                push!(allCoeffs, DataFrame(wave = [wave], reduced_freq = [reduced_freq], k = [k], coeffs = [coeffs[:,ang[:Nt]*2+1:end]]))
             end
         end  
     end  

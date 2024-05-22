@@ -3,16 +3,17 @@ using Puffer
 motions 
 # build out a fake sim and copy the panel velocities for the inputs of motions
 for motion in motions[192:192]
+    f,a = out[(0.17453292f0, 0.25f0, 0.4f0)]
     test = deepcopy(defaultDict)
     test[:N] = 50
     test[:Nt] = 100
     test[:Ncycles] = 5
-    test[:f] = motion[2]
+    test[:f] = f
     test[:Uinf] = 1
-    test[:kine] = motion[1]
-    test[:k] = motion[3]
-    test[:ψ] = 0.0
-    test[:motion_parameters] = 0.1
+    test[:kine] = :make_heave_pitch
+    
+    test[:ψ] = -pi/2
+    test[:motion_parameters] = [0.05f0, 0.0f0]
 
     
     begin
