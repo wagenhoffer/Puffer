@@ -2,7 +2,7 @@
 
 julia_version = "1.9.3"
 manifest_format = "2.0"
-project_hash = "e10b9897d1ecb3946e92b224319a2beab0722127"
+project_hash = "90eb6b11735133b4a7177aa9087e893d4d1891ac"
 
 [[deps.ADTypes]]
 git-tree-sha1 = "f5c25e8a5b29b5e941b7408bc8cc79fea4d9ef9a"
@@ -503,6 +503,12 @@ version = "1.0.2"
 deps = ["DataDrivenDiffEq", "Reexport", "SymbolicRegression"]
 git-tree-sha1 = "9d39b0c8725ba08e1a8f667efc615abfd9eaeda5"
 uuid = "7fed8a53-d475-4873-af3a-ba53cceea094"
+version = "0.1.2"
+
+[[deps.DataDrivenSparse]]
+deps = ["DataDrivenDiffEq", "LinearAlgebra", "Printf", "Reexport"]
+git-tree-sha1 = "62c1877475c7fbad13a3df008e919960bcecb842"
+uuid = "5b588203-7d8b-4fab-a537-c31a7f73f46b"
 version = "0.1.2"
 
 [[deps.DataFrames]]

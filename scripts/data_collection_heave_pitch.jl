@@ -10,13 +10,14 @@ td = LinRange{Int}(0, 10, 6)
 θs = deg2rad.(td).|> T    
 hs = LinRange{T}(0.0, 0.25, 6)
 
+
 fna = Dict()
 for θ0 in θs
     for h0 in hs
         for St in strouhals
             # Call the solver
             if θ0 == 0 && h0 == 0.0
-                continue
+                fna[(θ0, h0, St)] = (1.0f0, 0.0f0)
             else
                 # @show θ0, h0, St
                 function eq!(out, x)        
@@ -53,7 +54,7 @@ begin
     for strou in strouhals
         for θ in θs
             for h in hs     
-                if  θ != 0 && h != 0.0 
+                # if  θ != 0 && h != 0.0 
                     f,a = fna[(θ, h, strou)]
                     
                     @show strou, θ, h, f, a 
@@ -123,11 +124,11 @@ begin
                         elseif i > flow.N*2+1
                             append!(datas,df)                            
                         end
-                        plot(foil,wake)
+                        # plot(foil,wake)
                     end
                     push!(allofit, datas)
                     push!(allCoeffs, DataFrame(Strouhal = [strou], θ=[θ], h=[h], f = [f], coeffs = [coeffs[:,h_p[:Nt]*2+1:end]]))
-                end    
+                # end    
             end            
         end
     end  

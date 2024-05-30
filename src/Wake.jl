@@ -135,6 +135,22 @@ function release_vortex!(wake::Wake, foil::Foil)
     nothing
 end
 
+"""
+    add_vortex!(wake::Wake, foil::Foil)
+
+Reduced order model for adding a vortex to the wake
+"""
+function add_vortex!(wake::Wake, foil::Foil, Γ, pos = nothing)
+    if isnothing(pos)
+        pos = (foil.col[:, 1] + foil.col[:, end])/2.0
+    end        
+    wake.xy = [wake.xy pos]
+    wake.Γ = [wake.Γ..., Γ]
+    # Set all back to zero for the next time step
+    wake.uv = [wake.uv .* 0.0 [0.0, 0.0]]
+    nothing
+end
+
 function cancel_buffer_Γ!(wake::Wake, foil::Foil)
     #TODO : Add iterator for matching 1->i for nth foil
     wake.xy[:, 1] = foil.edge[:, end]

@@ -40,47 +40,47 @@ function build_dataloaders(mp::ModelParams; data_file="single_swimmer_ks_0.35_2.
    
     RHS = hcat(data[:, :RHS]...).|>Float32
     μs  = hcat(data[:, :μs]...).|>Float32
-    P   = vcat(data[:, :pressure]...).|>Float32
-    low = -5000
-    high = -low
-    these = low .< (data[:,:reduced_freq] ./ data[:,:k] ) .< high
-    count = sum(these)
+    P   = vcat(data[:, :pressure]...)'.|>Float32
+  
     N = mp.layers[1]
-    
+    cnt = size(RHS,2)
     pad = 2
-    inputs = zeros(Float32, N + pad*2, 2, 4, count)
+    inputs = zeros(Float32, N + pad*2, 2, 4, cnt)
     
     i = 1
-    for row in eachrow(data)
-        if low < row.reduced_freq / row.k < high
-            position = row.position .- minimum(row.position, dims=2) 
-        
-            x_in = [position' row.normals' row.wake_ind_vel' row.panel_vel' ]    
-            x_in = vcat(x_in[end-pad+1:end,:,:,:],x_in,x_in[1:pad,:,:,:])
-            x_in = reshape(x_in, size(x_in,1), 2, size(x_in, 2) ÷ 2, 1) #shape the data to look like channels
-            inputs[:,:,:,i] = x_in
-            i += 1
-        end
+    for row in eachrow(data)  
+        position        = row.position 
+        position[1,:] .-= minimum(position[1,:] , dims=1) 
+    
+        x_in = [position' row.normals' row.wake_ind_vel' row.panel_vel' ]    
+        x_in = vcat(x_in[end-pad+1:end,:,:,:],x_in,x_in[1:pad,:,:,:])
+        x_in = reshape(x_in, size(x_in,1), 2, size(x_in, 2) ÷ 2, 1) #shape the data to look like channels
+        inputs[:,:,:,i] = x_in
+        i += 1
     end
 
-    #force, lift, thrust, power 
-    # perfs = zeros(4, size(data,1))
-    perfs = zeros(4, count)
+
+    perfs = zeros(4, cnt)
     ns = coeffs[1,:coeffs]|>size|>last
     i = 1
     motions = []
-    for r in eachrow(coeffs)
-        # perf =  r.reduced_freq < 1 ? r.coeffs : r.coeffs ./ (r.reduced_freq^2/r.k)        
-        # perfs[:,ns*(i-1)+1:ns*i] = perf
-        if low < r.reduced_freq / r.k < high
+    if "Strouhal" in names(coeffs)
+        for r in eachrow(coeffs)        
             perfs[:,ns*(i-1)+1:ns*i] = r.coeffs
-            push!(motions, (r.wave,r.reduced_freq,r.k))
+            f,a = fna[(r.θ, r.h, r.Strouhal)]
+            push!(motions, (:make_heave_pitch, f, r.h, r.θ , r.Strouhal))
             i += 1
         end
-        # perfs[:,ns*(i-1)+1:ns*i] = r.coeffs
+    else
+        for r in eachrow(coeffs)        
+            perfs[:,ns*(i-1)+1:ns*i] = r.coeffs
+            push!(motions, (r.wave,r.reduced_freq,r.k))
+            i += 1        
+        end
     end
-
-    dataloader = DataLoader((inputs=inputs, RHS=RHS[:,findall(these)], μs=μs[:,findall(these)], perfs=perfs, P=P[findall(these), :]'), batchsize=mp.batchsize, shuffle=true)    
+    
+    dataloader = DataLoader((inputs=inputs, RHS=RHS, μs=μs, perfs=perfs, P=P), batchsize=mp.batchsize, shuffle=true)    
+    dataloader, motions
 end
 
 # W, H, C, Samples = size(dataloader.data.inputs)
@@ -364,11 +364,9 @@ function save_state(mp;prefix="")
     jldsave(path; bdnn_state)
     path = joinpath("data", l)
     jldsave(path; l_state)
-    path = joinpath("data", perf)
-    jldsave(path; perf_state)
 end
 
-function make_plots_and_save(mp, dataloader, latentdata, convNN, μAE, B_DNN, L, perfNN, Glosses, μlosses, blosses, convNNlosses; which = nothing, prefix = "")
+function make_plots_and_save(mp, dataloader, latentdata, convNN, μAE, B_DNN, L, Glosses, μlosses, blosses, convNNlosses; which = nothing, prefix = "")
 
     dir_name = prefix*join(["$(layer)->" for layer in mp.layers])[1:end-2]
     dir_path = joinpath("images", dir_name)
@@ -440,33 +438,137 @@ function make_plots_and_save(mp, dataloader, latentdata, convNN, μAE, B_DNN, L,
     plot(a,b, size=(1200,800))
     savefig(joinpath(dir_path,"L_recon"*join(["$(layer)->" for layer in mp.layers])[1:end-2]*".png"))
 
-    # which = rand(1:199)
-    # ns = 501
-    # c = plot(latentdata.data.νs[:,ns*which+1:ns*(which+1)], st=:contour, label="input")
-    # plot!(c, colorbar=:false)
-    # title!("Latent")
-    # plot(latentdata.data.perfs[1,ns*which+1:ns*(which+1)], label="Truth")
-    # a = plot!(perfNN(latentdata.data.νs[:,ns*which+1:ns*(which+1)])[2,:], label="Approx", marker=:circle, ms=1)
-    # title!("Lift")
-    # plot(latentdata.data.perfs[2,ns*which+1:ns*(which+1)], label="Truth")
-    # b = plot!(perfNN(latentdata.data.νs[:,ns*which+1:ns*(which+1)])[3,:], label="Approx", marker=:circle, ms=1)
-    # title!("Thrust")
-    # plot(c,a,b, layout = (3,1), size = (1200,800))
-    # savefig(joinpath(dir_path,"perfNN"*join(["$(layer)->" for layer in mp.layers])[1:end-2]*".png"))
+
 
     e = plot(convNNlosses, yscale=:log10, title="ConvNN")
     a = plot(μlosses,      yscale=:log10, title="μAE")
     b = plot(blosses,      yscale=:log10, title="B_DNN")
     c = plot(Glosses,      yscale=:log10, title="L")
-    # d = plot(perflosses,   yscale=:log10, title="perfNN")
+
     plot(a,b,c,e, size=(1200,800))
     savefig(joinpath(dir_path,"losses"*join(["$(layer)->" for layer in mp.layers])[1:end-2]*".png"))
 end
 
-layers = [[64,32,16,8]
-,
-          [64,64,64,64]]
+function sampled_motion(motions, inputs; num_samps=8, nT=500)
+    # test ways to sample the data for an approximator        
+    samps = zeros(Float32, num_samps, 2, 4,  length(motions)*nT);
 
+    stride = 64 ÷ num_samps    
+
+    for (j,motion) in enumerate(motions)    
+        sampler =  deepcopy(defaultDict)
+        sampler[:Nt] = 100
+        sampler[:N]  = num_samps  
+        sampler[:kine] = motion[1]
+        sampler[:f] = motion[2]    
+        if motion[1] == :make_heave_pitch        
+            sampler[:motion_parameters] = [motion[3], motion[4]]        
+        else        
+            sampler[:motion_parameters] = [0.1]        
+            sampler[:k] = motion[3]
+            sampler[:wave] = motion[1]
+        end
+        sampler[:ψ] = -π/2
+        foil, flow = init_params(; sampler...)
+        # (foil)(flow)
+        image = []
+        slice = ns*(j-1)+1:ns*j 
+        #induced_velocities from input images
+        ivs = inputs[stride:stride:end,:,3,slice]    
+        te = zeros(Float32, nT)
+        for i = 1:nT
+            (foil)(flow)
+            get_panel_vels!(foil, flow)
+            te[i] = foil.foil[2,1]
+            foil.col[1,:]  = foil.col[1,:] .- minimum(foil.foil[1,:])
+
+            push!(image, reshape([foil.col' foil.panel_vel' foil.normals' ivs[:,:,i] ], (num_samps,2,4)))
+        end
+    
+        samps[:,:,:,slice] = cat(image..., dims=4)
+    end
+    samps
+end
+
+function upconverter_pressure_networks(latentdata, controller, P, mp)
+    dl = DataLoader((approx = controller, RHS = RHS ), batchsize=mp.batchsize, shuffle=true)
+    
+    W,H,C,N = size(controller)
+    upconv = Chain(Conv((4,2), C=>C, Flux.tanh, pad=SamePad()),                            
+                Flux.flatten,             
+                Dense(W*H*C, 64)) |> mp.dev                
+
+    upstate = Flux.setup(ADAM(mp.η), upconv)
+
+    losses = []
+    for epoch = 1:mp.epochs
+        for (x, y,) in dl  
+            x = x |> mp.dev
+            y = y |> mp.dev
+            ls = 0.0
+            grads = Flux.gradient(upconv) do m
+                # Evaluate model and loss inside gradient context:                
+                ls = errorL2(m(x), y)              
+            end
+            Flux.update!(upstate, upconv, grads[1])
+            push!(losses, ls)  # logging, outside gradient context
+            
+        end
+        if epoch %  10 == 0
+            println("Epoch: $epoch, Loss: $(losses[end])")
+        end
+    end
+
+    #these add the latent spaces to the image/sampled space
+    if size(controller,3) == 4
+        latim = permutedims(cat(latentdata.data.νs, latentdata.data.βs, dims=3), (1,3,2));
+        latim = reshape(latim, (size(latim)[1:2]...,1, size(latim,3)));
+        controller = cat(controller, latim, dims=3);
+    end
+
+    pndata = DataLoader((images = controller, perfs = latentdata.data.perfs, μs = latentdata.data.μs, P = P ), batchsize=mp.batchsize, shuffle=true)
+    pNN = Chain(Conv((4,2), 5=>5, Flux.tanh, pad = SamePad()),            
+                Conv((2,2), 5=>2,  pad = SamePad()),
+                Flux.flatten,   
+                #TODO: 32 is a magic number!
+                Dense(32,mp.layers[1],Flux.tanh),
+                SkipConnection(Chain(Dense(mp.layers[1],mp.layers[1],Flux.tanh),
+                                    Dense(mp.layers[1],mp.layers[1])),+),
+                Dense(mp.layers[1],mp.layers[end],Flux.tanh),
+                Dense(mp.layers[end],3))|>mp.dev  
+
+    pNNstate = Flux.setup(ADAM(mp.η), pNN)
+
+    for epoch = 1:mp.epochs
+        for (ims, perf, μs, P) in pndata
+            ims = ims |> mp.dev 
+            P = P |> mp.dev       
+            lift = perf[2,:] |> mp.dev
+            thrust = perf[3,:] |> mp.dev
+            Γs = μs |> mp.dev
+            Γs = Γs[1,:] - Γs[end,:]
+            pls = 0.0
+            grads = Flux.gradient(pNN) do m
+                phat = m[1:4](ims)
+                pls = errorL2(m[5].layers(phat), P) #match pressure inside the network
+                y = m(ims)
+    
+                pls += errorL2(y[2,:], thrust)#thrust
+                pls += errorL2(y[1,:], lift) #lift
+                pls += errorL2(y[3,:], Γs)
+                # ls = errorL2(y[:], Γs)             
+                
+            end
+            Flux.update!(pNNstate, pNN, grads[1])
+            push!(plosses, pls)  # logging, outside gradient context
+        end
+        if epoch %  (mp.epochs /10) == 0
+            println("Epoch: $epoch, Loss: $(plosses[end])")
+        end
+    end
+    plosses
+    upconv, upstate, pNN, pNNstate, losses, plosses
+end
         #   [64,64,32],
         #   [64,32,16],
         #   [64,64,16],          
@@ -477,23 +579,31 @@ layers = [[64,32,16,8]
 for layer in layers        
     @show layer
     prefix="a0hnp_"
+    hp_file = "a0_single_swimmer_thetas_0_10_h_0.0_0.25_fs_0.2_0.4_h_p.jls"
+    hp_coeff = "a0_single_swimmer_coeffs_thetas_0_10_h_0.0_0.25_fs_0.2_0.4_h_p.jls"
+
     mp = ModelParams(layer,  0.001, 500, 4096, errorL2, gpu)
     bAE, μAE, convNN, perfNN = build_networks(mp)
     μstate, bstate, convNNstate, perfNNstate = build_states(mp, bAE, μAE, convNN, perfNN)
-    # dataloader = build_dataloaders(mp)
+    dataloader,motions = build_dataloaders(mp;data_file=hp_file, coeffs_file=hp_coeff)
     @show "Train Conv and AEs"
     B_DNN,(convNNlosses, μlosses, blosses) = train_AEs(dataloader, convNN, convNNstate, μAE, μstate, bAE, bstate, mp; ϵ=1e-4)
     @show "Train L"
     L, Lstate, latentdata = build_L_with_data(mp, dataloader, μAE, B_DNN)
-    Glosses = train_L(L, Lstate, latentdata, mp, B_DNN, μAE)
-    @show "Train perfNN"
-    perflosses = train_perfNN(latentdata, perfNN, perfNNstate, mp)
+    Glosses = train_L(L, Lstate, latentdata, mp, B_DNN, μAE)    
     @show "Save State and Make Plots $layer"
     save_state(mp;prefix=prefix)
-    make_plots_and_save(mp, dataloader, latentdata, convNN, μAE, B_DNN, L, perfNN, Glosses, μlosses, blosses, convNNlosses;prefix=prefix)
+    make_plots_and_save(mp, dataloader, latentdata, convNN, μAE, B_DNN, L,  Glosses, μlosses, blosses, convNNlosses;prefix=prefix)
+    @show "make a controller for training"
+    controller = sampled_motion(motions, dataloader.data.inputs; num_samps=layer[end], nT=500)
+    upconv, upstate, pNN, pNNstate, losses, plosses = upconverter_pressure_networks(latentdata, controller, P, mp)
+    #TODO:SAVE the above models  
+    #TODO: make plots for the above models
+
 end
 begin
     prefix="a0hnp_"
+
     layer = layers|>first
     mp = ModelParams(layer,  0.01, 50, 4096, errorL2, gpu)
     layerstr = join(["$(layer)->" for layer in mp.layers])[1:end-2]
@@ -501,7 +611,7 @@ begin
     bAE, μAE, convNN, perfNN = build_networks(mp)
     μstate, bstate, convNNstate, perfNNstate = build_states(mp, bAE, μAE, convNN, perfNN)
     B_DNN = build_BDNN(convNN, bAE, mp)
-    # dataloader = build_dataloaders(mp)
+    dataloader = build_dataloaders(mp, data_file=hp_file, coeffs_file=hp_coeff)
     #load previous state
     load_AEs(;μ=prefix*"μAE_L$(layerstr).jld2", bdnn=prefix*"B_DNN_L$(layerstr).jld2")
     L, Lstate, latentdata = build_L_with_data(mp, dataloader, μAE, B_DNN)

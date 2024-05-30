@@ -3,7 +3,7 @@ using Flux
 using Serialization
 using DataFrames
 
-data_file="single_swimmer_ks_0.35_2.0_fs_0.25_4.0_ang_car.jls"
+"""data_file="single_swimmer_ks_0.35_2.0_fs_0.25_4.0_ang_car.jls"
 coeffs_file= "single_swimmer_coeffs_ks_0.35_2.0_fs_0.25_4.0_ang_car.jls"
 # load/ prep  training data
 data = deserialize(joinpath("data", data_file))
@@ -51,6 +51,7 @@ for r in eachrow(coeffs)
 end
 
 # dataloader = DataLoader((inputs=inputs, RHS=RHS[:,findall(these)], μs=μs[:,findall(these)], perfs=perfs, P=P[findall(these), :]'), batchsize=mp.batchsize, shuffle=true)    
+"""
 
 # test ways to sample the data for an approximator
 num_samps = 8
@@ -108,17 +109,14 @@ dl = DataLoader((approx = samps, RHS = RHS, μs = latentdata.data.μs,
                 perfs = latentdata.data.perfs ), batchsize=1024*4, shuffle=true)
 sd = dl|>first
 W,H,C,N = size(samps)
-model = Chain(Conv((4,2), C=>C, Flux.tanh, pad=SamePad()),                            
+upconv = Chain(Conv((4,2), C=>C, Flux.tanh, pad=SamePad()),                            
               Flux.flatten,             
               Dense(W*H*C, 64)) |> gpu
-# model = Chain(Flux.flatten,             
-#               Dense(W*H*C, W*H*C, Flux.tanh),
-#               Dense(W*H*C, 64, Flux.tanh),
-#               Dense(64, 64, Flux.tanh),) |> gpu              
+          
 
-model(sd.approx|>gpu)
+upconv(sd.approx|>gpu)
 
-state = Flux.setup(ADAM(0.01), model)
+state = Flux.setup(ADAM(0.01), upconv)
 
 losses = []
 for epoch = 1:500
@@ -126,11 +124,11 @@ for epoch = 1:500
         x = x |> mp.dev
         y = y |> mp.dev
         ls = 0.0
-        grads = Flux.gradient(model) do m
+        grads = Flux.gradient(upconv) do m
             # Evaluate model and loss inside gradient context:                
-            ls = Flux.mse(m(x), y)              
+            ls = errorL2(m(x), y)              
         end
-        Flux.update!(state, model, grads[1])
+        Flux.update!(state, upconv, grads[1])
         push!(losses, ls)  # logging, outside gradient context
         
     end
@@ -138,7 +136,7 @@ for epoch = 1:500
         println("Epoch: $epoch, Loss: $(losses[end])")
     end
 end
-out = model(samps|>gpu) |>cpu
+out = upconv(samps[:,:,1:4,:]|>gpu) |>cpu
 @show errorL2(out, RHS)
 @show Flux.mse(out, RHS)
 
@@ -146,9 +144,9 @@ ers = norm.([x for x in eachcol(out .- RHS)], 2)./norm.([x for x in eachcol(RHS)
 val, this = findmax(ers)
 val, this = findmin(ers)
 # this -= 1
-this = rand(1:size(images,4))
+this = rand(1:size(samps,4))
 plot(RHS[:,this], label="RHS")
-plot!(model(samps[:,:,:,this:this]|>gpu) |>cpu, seriestype=:scatter, label="model")
+plot!(upconv(samps[:,:,1:4,this:this]|>gpu) |>cpu, seriestype=:scatter, label="model")
 
 
 outo = B_DNN.layers[1](dataloader.data.inputs|>gpu)|>cpu
@@ -161,36 +159,6 @@ this = rand(1:size(images,4))
 plot(RHS[:,this], label="RHS")
 plot!(B_DNN.layers[1](dataloader.data.inputs[:,:,:,this:this]|>gpu)|>cpu, seriestype=:scatter, label="model")
 
-# encdec = Chain(Dense(64, num_samps, Flux.tanh), Dense(num_samps, 64)) |> gpu
-# estate = Flux.setup(ADAM(0.01), encdec)
-# losses = []
-# for epoch = 1:100
-#     for (x, y) in dl  
-#         x = x |> mp.dev
-#         y = y |> mp.dev
-#         ls = 0.0
-#         grads = Flux.gradient(encdec) do m
-#             # Evaluate model and loss inside gradient context:                
-#             ls = errorL2(m(y), y)              
-#         end
-#         Flux.update!(estate, encdec, grads[1])
-#         push!(losses, ls)  # logging, outside gradient context
-        
-#     end
-#     if epoch %  10 == 0
-#         println("Epoch: $epoch, Loss: $(losses[end])")
-#     end
-# end
-
-# eout = encdec(RHS|>gpu) |>cpu
-# @show errorL2(eout, RHS)
-# encer = norm.([x for x in eachcol(eout .- RHS)], 2)./norm.([x for x in eachcol(RHS)], 2)
-# val, this = findmax(encer)
-# val, this = findmin(encer)
-
-# this = rand(1:size(images,4))
-# plot(RHS[:,this], label="RHS")
-# plot!(eout[:,this], seriestype=:scatter, label="model")
 
 
 pNN = Chain(Conv((4,2), 5=>5, Flux.tanh, pad = SamePad()),            
@@ -216,7 +184,7 @@ end
 pNN[1:4](samps[:,:,:,1:4]|>mp.dev)
 pndata = DataLoader((images = samps, perfs = perfs, μs = μs, P = P ), batchsize=1024*4, shuffle=true)
 
-for epoch = 1:500
+for epoch = 1:1000
     for (ims, perf, μs, P) in pndata
         ims = ims |> mp.dev 
         P = P |> mp.dev       
@@ -224,20 +192,20 @@ for epoch = 1:500
         thrust = perf[3,:] |> mp.dev
         Γs = μs |> mp.dev
         Γs = Γs[1,:] - Γs[end,:]
-        ls = 0.0
+        pls = 0.0
         grads = Flux.gradient(pNN) do m
             phat = m[1:4](ims)
-            ls = errorL2(m[5].layers(phat), P) #match pressure inside the network
+            pls = errorL2(m[5].layers(phat), P) #match pressure inside the network
             y = m(ims)
             # ls = errorL2(y, vcat(lift', thrust', Γs')) #lift
-            ls += errorL2(y[2,:], thrust)#thrust
-            ls += errorL2(y[1,:], lift) #lift
-            ls += errorL2(y[3,:], Γs)  
+            pls += errorL2(y[2,:], thrust)#thrust
+            pls += errorL2(y[1,:], lift) #lift
+            pls += errorL2(y[3,:], Γs)
             # ls = errorL2(y[:], Γs)             
             
         end
         Flux.update!(pNNstate, pNN, grads[1])
-        push!(plosses, ls)  # logging, outside gradient context
+        push!(plosses, pls)  # logging, outside gradient context
     end
     if epoch %  (mp.epochs /10) == 0
         println("Epoch: $epoch, Loss: $(plosses[end])")
@@ -280,13 +248,14 @@ begin
         push!(pe, errorL2(pres[:,slice], P[:,slice]))
     end
     @show [argmax(v) for v in [le, te, ge, pe]]
-    @show [argmin(v) for v in [le, te, ge, pe]]
+    # @show [argmin(v) for v in [le, te, ge, pe]]
 end
 
 begin
     wh= argmax(pe)
-    # wh= rand(1:175)
-    slice = ns*wh+1:ns*(wh+1)
+    wh= rand(1:235)
+    slice = ns*(wh-1)+1:ns*(wh)
+
     @show h,θ,St = h_p_coeffs[wh, [:h,:θ,:Strouhal]]
     # @show errorL2(y[2,slice], thrust[slice])
     # @show Flux.mse(y[2,slice], thrust[slice])
@@ -437,7 +406,7 @@ motions = []
 for r in eachrow(h_p_coeffs)
     # perf =  r.reduced_freq < 1 ? r.coeffs : r.coeffs ./ (r.reduced_freq^2/r.k)        
     # perfs[:,ns*(i-1)+1:ns*i] = perf
-    
+    @show r.θ, r.h
     perfs[:,ns*(i-1)+1:ns*i] = r.coeffs
     f,a = fna[(r.θ, r.h, r.Strouhal)]
     push!(motions, (:make_heave_pitch, f, r.h, r.θ , r.Strouhal))

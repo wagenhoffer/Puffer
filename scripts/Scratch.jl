@@ -11,7 +11,7 @@ heave_pitch[:f] = 1.0
 heave_pitch[:Uinf] = 1
 heave_pitch[:kine] = :make_heave_pitch
 heave_pitch[:ψ]=0.0
-θ0 = -0.05#deg2rad(5)
+θ0 = -0.0#deg2rad(5)
 h0 = 0.0
 heave_pitch[:motion_parameters] = [h0, θ0]
 
@@ -590,3 +590,50 @@ end
 
 # Example usage
 visualize_schooling(0.5, 1.5)
+
+
+
+begin
+# compare velocity field of a single panel to that of two vortices
+xs  = -1:0.1:1
+ys  = -1:0.1:1
+X   = xs.* ones(size(ys))'
+Y   = ones(size(xs)) .* ys'
+mu = [0.25 0.5 ]
+targets = [X[:] Y[:]]'
+source = [-0.25 0 0.25
+           0.  0 -0.]
+x1, x2, y = panel_frame(targets, source)
+nw, nb = size(x1)
+lexp = zeros((nw, nb))
+texp = zeros((nw, nb))
+yc = zeros((nw, nb))
+xc = zeros((nw, nb))
+β = [-pi ] #[atan.(1, 1)]
+β = repeat(β, 1, nw)'
+@. lexp = log((x1^2 + y^2) / (x2^2 + y^2)) / (4π)
+@. texp = (atan(y, x2) - atan(y, x1)) / (2π)
+@. xc = lexp * cos(β) - texp * sin(β)
+@. yc = lexp * sin(β) + texp * cos(β)
+@. lexp =  (y/(x1^2  + y^2)  - y/(x2^2 + y^2))/2π
+@. texp = -(x1/(x1^2 + y^2) - x2/(x2^2 + y^2))/2π
+@. xc = lexp * cos(β) - texp * sin(β)
+@. yc = lexp * sin(β) + texp * cos(β)
+uvP = [xc * mu'  yc * mu']'   
+
+Γs = [-mu[1] mu[1]-mu[2] mu[2]] 
+# Γs = [-mu[1] mu[1]] 
+# ps = [foil.foil foil.edge]
+uvΓ = vortex_to_target(source, targets, Γs, flow)
+magΓ = reshape(sqrt.(sum(abs2, uvΓ, dims = 1)), (size(xs,1), size(ys,1)))
+magP = reshape(sqrt.(sum(abs2, uvP, dims = 1)), (size(xs,1), size(ys,1)))
+du = uvP - uvΓ
+d = quiver(targets[1,:], targets[2,:],  quiver = (uvΓ[1,:], uvΓ[2,:]), aspect_ratio = :equal, label="")
+e = quiver(targets[1,:], targets[2,:],  quiver = (uvP[1,:], uvP[2,:]), aspect_ratio = :equal, label="")
+f = quiver(targets[1,:], targets[2,:],  quiver = (du[1,:], du[2,:]), aspect_ratio = :equal, label="")
+a = plot( magΓ', st = :contour, levels = 50, color = :viridis, aspect_ratio = :equal)
+b = plot( magP', st = :contour, levels = 50, color = :viridis, aspect_ratio = :equal)
+c = plot((magP-magΓ)', st = :contour, levels = 50, color = :viridis, aspect_ratio = :equal)
+plot(a,b,c, layout = (1,3), size = (1000, 400))
+plot(e, d, f, layout = (1,3), size = (1200, 400))
+end
