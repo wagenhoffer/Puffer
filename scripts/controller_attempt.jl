@@ -213,56 +213,43 @@ for epoch = 1:1000
 end
 plosses
  
-begin
 
-    wh = rand(0:175)
-    ns = nT
-   
+function find_worst(latentdata, dataloader, pNN;ns = 500)    
+    perfs = latentdata.data.perfs
     lift = perfs[2,:] 
     thrust = perfs[3,:] 
     pres  = pNN[5].layers(pNN[1:4](pndata.data.images|>gpu))|>cpu
-    Γs = μs 
+    Γs = latentdata.data.μs 
     Γs = Γs[1,:] - Γs[end,:]
+    P = dataloader.data.P
         
     y = pNN(pndata.data.images|>gpu)|>cpu
-    #         # Evaluate model and loss inside gradient context:
-    # presse  = errorL2(pres[:,slice], P[slice,:]') #match pressure inside the network            
-    # lifte   = errorL2(y[1,slice], lift[slice]) #lift
-    # thruste = errorL2(y[2,slice], thrust[slice])#thrust  
-    # gammae  = errorL2(y[3,slice], Γs[slice])             
-    # @show (lifte,thruste, gammae, presse)
-    # presse  = l2norm(pres[:,slice], P[slice,:]') #match pressure inside the network            
-    # lifte   = l2norm(y[1,slice], lift[slice]) #lift
-    # thruste = l2norm(y[2,slice], thrust[slice])#thrust  
-    # gammae  = l2norm(y[3,slice], Γs[slice])           
-    # @show (lifte,thruste, gammae, presse)
+
     le = []
     te = []
     ge = []
     pe = []
-    for i = 1:175
+    for i = 1:200
         slice = ns*(i-1)+1:ns*i
         push!(le, errorL2(y[1,slice], lift[slice]))
         push!(te, errorL2(y[2,slice], thrust[slice]))
         push!(ge, errorL2(y[3,slice], Γs[slice]) )
         push!(pe, errorL2(pres[:,slice], P[:,slice]))
     end
-    @show [argmax(v) for v in [le, te, ge, pe]]
-    # @show [argmin(v) for v in [le, te, ge, pe]]
+    (wl,wt,wg,wp) = [argmax(v) for v in [le, te, ge, pe]]
+    wl,wt,wg,wp, y, pres
 end
 
-begin
-    wh= argmax(pe)
-    wh= rand(1:235)
+function plot_controller(y, lift, thrust, Γs, P, pres;prefix="",wh=nothing, name="", nsims=200, ns=500)
+    
+    wh= isnothing(wh) ? rand(1:nsims) : wh
+    @show string(motions[wh])
     slice = ns*(wh-1)+1:ns*(wh)
 
-    @show h,θ,St = h_p_coeffs[wh, [:h,:θ,:Strouhal]]
-    # @show errorL2(y[2,slice], thrust[slice])
-    # @show Flux.mse(y[2,slice], thrust[slice])
-    # @show norm(y[slice]-thrust[slice],Inf)/ norm(thrust[slice],0)
     plot(lift[slice], lw=4,label="lift")
     a = plot!(y[1,slice], lw = 0, marker=:circle, label="model")
-    title!("h: $(round(h, digits=2)), θ: $(round(θ|>rad2deg, digits=1)|>Int), St: $(round(St, digits=2))")
+    title!(string(motions[wh]))
+    # title!("h: $(round(h, digits=2)), θ: $(round(θ|>rad2deg, digits=1)|>Int), St: $(round(St, digits=2))")
     plot(thrust[slice], lw=4,label="thrust")
     b = plot!(y[2,slice], lw = 0, marker=:circle, label="model")
     plot(Γs[slice], lw=4,label="Γ")
@@ -274,10 +261,23 @@ begin
     title!("model")
     f = plot(d,e, layout = (1,2))
     
-    plot(a,b,c,f, layout = (4,1), size = (1200,1000))
-    
+    g = plot(a,b,c,f, layout = (4,1), size = (1200,1000))
 
+    dir_name = prefix*join(["$(layer)->" for layer in mp.layers])[1:end-2]
+    dir_path = joinpath("images", dir_name)
+    savefig(joinpath(dir_path,name*"controller"*join(["$(layer)->" for layer in mp.layers])[1:end-2]*".png"))    
 end
+
+(wl,wt,wg,wp, approx, pres) = find_worst(latentdata, pndata, pNN)
+Γs = latentdata.data.μs 
+Γs = Γs[1,:] - Γs[end,:]
+lift = latentdata.data.perfs[2,:]|>cpu
+thrust = latentdata.data.perfs[3,:]|>cpu
+plot_controller(approx,lift, thrust,Γs, P, pres ;wh=wl, prefix=prefix, name="worst_lift")
+plot_controller(approx,lift, thrust,Γs, P, pres ;wh=wt, prefix=prefix, name="worst_thrust")
+plot_controller(approx,lift, thrust,Γs, P, pres ;wh=wg, prefix=prefix, name="worst_Γ")
+plot_controller(approx,lift, thrust,Γs, P, pres ;wh=wp, prefix=prefix, name="worst_pressure")
+plot_controller(approx,lift, thrust,Γs, P, pres ;wh=nothing, prefix=prefix, name="Random")
 
 l2norm(x,y) = norm(x-y,2)
 plot(le, label="lift")

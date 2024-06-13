@@ -80,7 +80,7 @@ begin
                     coeffs[:,i] = get_performance(foil, flow, p)
                     old_mus = [foil.μs'; old_mus[1:2, :]]
                     old_phis = [phi'; old_phis[1:2, :]]
-                    df = datas = DataFrame(reduced_freq = [reduced_freq],
+                    df = DataFrame(reduced_freq = [reduced_freq],
                                             k = [k],
                                             U_inf = [flow.Uinf],
                                             t = [flow.n * flow.Δt],
@@ -94,9 +94,10 @@ begin
                                             pressure = [deepcopy(p)], 
                                             RHS = [deepcopy(rhs)])
 
-                    if i <= ang[:Nt] * 2 + 1#skip first 2 cycles
-                        data = df
-                    elseif i > ang[:Nt] * 2 + 1
+                    if i == ang[:Nt] * 2 + 1#skip first 2 cycles
+                        @show i
+                        datas = df
+                    elseif i > ang[:Nt] * 2 + 1                        
                         append!(datas,df)
                     end
                 end
@@ -107,12 +108,11 @@ begin
         end  
     end  
     # path = joinpath("data", "starter_data.jls")
-    path = joinpath("data", "single_swimmer_ks_$(ks[1])_$(ks[end])_fs_$(reduced_freq_values[1])_$(reduced_freq_values[end])_ang_car.jls")
-    allofit = vcat(allofit...)
-    serialize(path, allofit)
+    path = joinpath("data", "single_swimmer_ks_$(ks[1])_$(ks[end])_fs_$(reduced_freq_values[1])_$(reduced_freq_values[end])_ang_car.jls")    
+    serialize(path, vcat(allofit...))
     path = joinpath("data", "single_swimmer_coeffs_ks_$(ks[1])_$(ks[end])_fs_$(reduced_freq_values[1])_$(reduced_freq_values[end])_ang_car.jls")
-    allCoeffs = vcat(allCoeffs...)
-    serialize(path, allCoeffs)
+    
+    serialize(path, vcat(allCoeffs...))
 end
 
 begin
