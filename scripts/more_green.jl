@@ -1,6 +1,6 @@
 include("Deep_Green.jl")
-# layers = [[64,32,16,8]]
-layers = [[64,64,64,64]]
+layers = [[64,32,16,8]]
+# layers = [[64,64,64,64]]
 
 
 ##TRAINING LOOP##
