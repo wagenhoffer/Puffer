@@ -9,15 +9,23 @@ include("hnp_nlsolve_strou.jl")
 
 function sample_field(foil::Foil;  dist = 2.0, N=10)
     n,t,l = norms(foil.edge)
-    cent  = mean(foil.foil, dims=2)
+    # cent  = mean(foil.foil, dims=2)
+    te = foil.foil[:,end]
     θ = atan(t[:,2]...)
 
-    xs = LinRange(-dist÷2, dist, N) 
+    xs = LinRange(-dist, dist, N) 
     ys = LinRange(-0.25, 0.25, N)
     X = repeat(xs, 1, length(ys))[:]
     Y = repeat(ys',length(xs),1)[:]
     
-    points = (rotation(-θ) *  [X'; Y']) .+ cent
+    points = (rotation(-θ) *  [X'; Y']) .+ te
+end
+function rotate_field(foil::Foil, field)
+    _,t,_ = norms(foil.edge)
+    # cent  = mean(foil.foil, dims=2)
+    te = foil.foil[:,end]
+    θ = atan(t[:,2]...)
+    rotation(-θ) *  (field.- te) 
 end
 function stencil_points(points; ϵ=sqrt(eps(Float32)))
     xp = deepcopy(points)
@@ -117,11 +125,21 @@ function de_stencil(phi)
     n = size(phi,2)÷5
     [phi[:,n*i+1:n*(i+1)] for i=0:4]
 end
+output = load("wake_body_vels_epsilon_cbrtF32_$layerstr.jld2")
+output = load("wake_body_vels_epsilon_sqrtF32_$layerstr.jld2")
+# push!(poss,  points)
+# push!(vels,  uv)
+# push!(phis,  phi)
+# push!(images, image)
 
+isamp = output["body"]
+psamp = output["wakepos"]
+vsamp = output["vels"]
+phisamp = output["phis"]
 
 begin
     T = Float32
-    ϵ = cbrt(eps(T))
+    ϵ = sqrt(eps(T))
     strouhals = LinRange{T}(0.2, 0.4, 7)
     td = LinRange{Int}(0, 10, 6)
     θs = deg2rad.(td).|> T    
@@ -165,8 +183,9 @@ begin
                 (foil2)(flow)
                 flow.n -= 1
                 points = zeros(2,100)
-                if flow.n > 0
-                    sf = sample_field(foil::Foil)
+                if flow.n > 100
+                    sf = sample_field(foil::Foil)                    
+                    sf = wake.xy[:, randperm(size(wake.xy, 2))[1:100]]
                     sp = stencil_points(sf;ϵ=ϵ)
                     points = sf #.+ foil.edge[:,end] .+flow.Δt
                     test = hcat(sf,sp)
@@ -215,42 +234,42 @@ begin
 end
 
 
-begin
-    #NATE: This is working. We are making the flow field strictly as a function of the foil source/doublets
-    # this is not using the edge panel influence 
-    #more over this shows that finding the potential field can be then stenciled for velocity fields.
-    xy,_, uv, uvb = grab_samp_wake(wake,foil,flow; nsamps = 200) 
-    # sf = sample_field(foil::Foil)
-    sp = stencil_points(xy;ϵ=ϵ)
-    points = hcat(xy,sp)
-    phi = phi_field(points,foil)
-    (p0, pxp, pxm, pyp, pym) = de_stencil(phi)
-    # uv1 = b2f(xy, foil, flow)
-    # ϵ = sqrt(eps(Float32))
-    # xp = deepcopy(xy)
-    # xp[1,:] .+= ϵ
-    # xm = deepcopy(xy)
-    # xm[1,:] .-= ϵ
-    # yp = deepcopy(xy)
-    # yp[2,:] .+= ϵ
-    # ym = deepcopy(xy)
-    # ym[2,:] .-= ϵ
+# begin
+#     #NATE: This is working. We are making the flow field strictly as a function of the foil source/doublets
+#     # this is not using the edge panel influence 
+#     #more over this shows that finding the potential field can be then stenciled for velocity fields.
+#     xy,_, uv, uvb = grab_samp_wake(wake,foil,flow; nsamps = 200) 
+#     # sf = sample_field(foil::Foil)
+#     sp = stencil_points(xy;ϵ=ϵ)
+#     points = hcat(xy,sp)
+#     phi = phi_field(points,foil)
+#     (p0, pxp, pxm, pyp, pym) = de_stencil(phi)
+#     # uv1 = b2f(xy, foil, flow)
+#     # ϵ = sqrt(eps(Float32))
+#     # xp = deepcopy(xy)
+#     # xp[1,:] .+= ϵ
+#     # xm = deepcopy(xy)
+#     # xm[1,:] .-= ϵ
+#     # yp = deepcopy(xy)
+#     # yp[2,:] .+= ϵ
+#     # ym = deepcopy(xy)
+#     # ym[2,:] .-= ϵ
 
-    # p0  = phi_field(xy,foil)
-    # pxp = phi_field(xp,foil)
-    # pxm = phi_field(xm,foil)
-    # pyp = phi_field(yp,foil)
-    # pym = phi_field(ym,foil)
-    Δϕ = (pxp + pym + pxm + pyp - 4*p0)/ϵ^2
-    u = (pxp - pxm)/(2ϵ)
-    v = (pyp - pym)/(2ϵ)
-    errorL2(u, uvb[1,:]), errorL2(v, uvb[2,:]), sum(abs2,Δϕ)/200
-end
+#     # p0  = phi_field(xy,foil)
+#     # pxp = phi_field(xp,foil)
+#     # pxm = phi_field(xm,foil)
+#     # pyp = phi_field(yp,foil)
+#     # pym = phi_field(ym,foil)
+#     Δϕ = (pxp + pym + pxm + pyp - 4*p0)/ϵ^2
+#     u = (pxp - pxm)/(2ϵ)
+#     v = (pyp - pym)/(2ϵ)
+#     errorL2(u, uvb[1,:]), errorL2(v, uvb[2,:]), sum(abs2,Δϕ)/200
+# end
 
 
 #work on body/foil to wake interactions
 nsamps = poss |> size|>first 
-dims, nts=  poss[1] |> size
+# dims, nts=  poss[1] |> size
 vels |> size
 images |> size
 images = images|>cpu
@@ -268,7 +287,8 @@ end
 # datar = DataLoader((wakepos = poss, body = images, vels = vels), batchsize = 16, shuffle = true)
 #save all of the values for the dataloader into a DataFrame and then save it to a JLD2 file
 
-jldsave("wake_body_vels_epsilon_cbrtF32_$layerstr.jld2"; wakepos = psamp, body = isamp, vels = vsamp, phis = phisamp)
+jldsave("wake_body_vels_epsilon_sqrtF32_$layerstr.jld2"; wakepos = psamp, body = isamp, vels = vsamp, phis = phisamp)
+
 datar = DataLoader((wakepos = psamp  .|>Float32, 
                     body    = isamp  .|>Float32, 
                     vels    = vsamp  .|>Float32,
@@ -335,14 +355,14 @@ begin
     inlayer = layer[end]*2
     hidden  = 64
     out     = 64
-    branch = Chain(Dense(inlayer,hidden, Flux.tanh; init=Flux.glorot_normal),
-                    Dense(hidden,hidden, Flux.tanh; init=Flux.glorot_normal),                
-                    Dense(hidden,hidden, Flux.tanh; init=Flux.glorot_normal),                
-                    Dense(hidden,out,    Flux.tanh; init=Flux.glorot_normal))|>gpu
-    trunk  = Chain(Dense(2,hidden,         Flux.tanh; init=Flux.glorot_normal),
-                    Dense(hidden,  hidden, Flux.tanh; init=Flux.glorot_normal),
-                    Dense(hidden,hidden, Flux.tanh; init=Flux.glorot_normal),                
-                    Dense(hidden,  out,    Flux.tanh; init=Flux.glorot_normal))|>gpu
+    branch = Chain(Dense(inlayer, hidden, Flux.tanh; init=Flux.glorot_normal),
+                    Dense(hidden, hidden, Flux.tanh; init=Flux.glorot_normal),                
+                    Dense(hidden, hidden, Flux.tanh; init=Flux.glorot_normal),                
+                    Dense(hidden, out,    Flux.tanh; init=Flux.glorot_normal))|>gpu
+    trunk  = Chain(Dense(2,       hidden, Flux.tanh; init=Flux.glorot_normal),
+                    Dense(hidden, hidden, Flux.tanh; init=Flux.glorot_normal),
+                    Dense(hidden, hidden, Flux.tanh; init=Flux.glorot_normal),                
+                    Dense(hidden, out,    Flux.tanh; init=Flux.glorot_normal))|>gpu
     onet(xs,ys) = permutedims((xs'*ys),(2,1))
     # onet(branch(vcat(nus,bes)|>gpu),trunk(wake|>gpu))
     Onet = Parallel( onet, branch, trunk)|>gpu
@@ -366,7 +386,7 @@ begin
     foil, flow = init_params(; test...)
     
     
-    ϵ  = cbrt(eps(Float32))
+    ϵ  = sqrt(eps(Float32))
     wake = sample_field(foil::Foil) #.+ [1.0,0 ]#.+2.3*flow.Δt #make sure the foil isn't rotated
     # wpx = (wake .+ [ϵ, 0])|>gpu
     # wmx = (wake .- [ϵ, 0])|>gpu
@@ -380,7 +400,7 @@ begin
 end
 begin
     ϕlosses = []
-    for i=1:500*4
+    for i=1:500*8
         for (_, body, vels, phis) in datar
             # wake = wake |> gpu
             body = body |> gpu
@@ -404,11 +424,12 @@ begin
                 Δϕ = (ϕpx + ϕmy + ϕmx + ϕpy - 4*ϕo)/ϵ^2
                 u  = (ϕpx - ϕmx)/2ϵ
                 v  = (ϕpy - ϕmy)/2ϵ
-                loss  = l₂loss(ϕa, phis)
-                # loss += Flux.mse(Δϕ, 0.0)
+                loss  = l₂loss(ϕa, phis)*100
+                loss += Flux.mse(Δϕ, 0.0)
                 # loss += sum(abs.(Δϕ))
-                loss += l₂loss(u', vels[1,:,:])
-                loss += l₂loss(v', vels[2,:,:])
+                loss += l₂loss(u', vels[1,:,:])*100
+                loss += l₂loss(v', vels[2,:,:])*100
+
                 # ϕls += errorL2(atan.(v,u), atan.(vels[2,:]',vels[1,:]'))
             end
             Flux.update!(ostate, Onet, grads[1])
@@ -421,8 +442,21 @@ begin
         
     end 
 end
+
+# save the Onet 
+stamp = "sqrtF32_DELTA"
+o_state = Flux.state(Onet)|>cpu;
+path = joinpath("data", "Onet_L$(layerstr)_$(stamp).jld2")
+jldsave(path; o_state)
+# Load the Onet
+path = joinpath("data", "Onet_L$(layerstr)_$(stamp).jld2")
+# path = joinpath("data", perf)
+perf_state = JLD2.load(path,"o_state")
+Flux.loadmodel!(Onet, perf_state)
+
 function nabla_phi(phi) 
     x0,xp,xm,yp,ym = de_stencil(phi)
+
     (-4.0*x0 + xp + xm + yp + ym)/ϵ^2
 end
 
@@ -465,7 +499,7 @@ begin
     
     # ust = (phipx - phimx)/2ϵ
     # vst = (phipy - phimy)/2ϵ
-    @show errorL2(u', vels[1,:,:]), errorL2(v', vels[2,:,:]), Flux.mse(Δϕ, 0.0), errorL2(ϕall, phis)
+    @show Flux.mse(Δϕ, 0.0), errorL2(ϕall, phis)
     # @show errorL2(ust', vels[1,:]), errorL2(vst', vels[2,:])
     wx = wx|>cpu
     wy = wy|>cpu
@@ -502,29 +536,71 @@ begin
     plot(an, nn, vfield, layout=(3,1), size=(900,650)) 
 end
 
+begin
+    using ForwardDiff
+    using Zygote
+
+    fivept = xyphi[:,1:100:end]
+    @time begin 
+        ϕ5pt= Onet(vcat(nus,bes)|>gpu, fivept)|>cpu
+        xypt = fivept[:,1:2]|>gpu
+        ust = (ϕ5pt[2] - ϕ5pt[3])/2ϵ
+        vst = (ϕ5pt[4] - ϕ5pt[5])/2ϵ
+    end
+    @time ForwardDiff.gradient(x->sum(Onet(vcat(nus,bes)|>gpu, x)), xypt)
+    @time ForwardDiff.jacobian(x->Onet(vcat(nus,bes)|>gpu, x), xypt)
+    @time Zygote.jacobian(x->sum(Onet(vcat(nus,bes)|>gpu, x)), xypt)
+        using Zygote
+        using Flux
+        using Random
+
+        Random.seed!(1234)
+
+        d = 1
+        u = Chain(
+        Dense(d => 8, tanh),
+        Dense(8 => 8, tanh),
+        Dense(8 => 8, tanh),
+        Dense(8 => 1)
+        )
+        ϵ = sqrt(eps(Float32))
+        _ϵ = inv(first(ϵ[ϵ .!= zero(ϵ)]))
+        ∇u(x) = Zygote.gradient(x -> sum(u(x)),x)[1]
+        n∇u(x) = (u(x.+ϵ)-u(x.-ϵ))*_ϵ./2
+        x = ones(Float32,d,1)
+        @time ∇u(x)
+        # -0.15050948
+        @time n∇u(x)
+end
+
+
 
 begin
+    num_samps = layer[end]
+    G = inv(L|>cpu)|>gpu
+    # (θ,h, st) = fna.keys[1]
     # (θ,h, st) = fna.keys[5]
-    θ = θs[end]
-    h = 0.0f0
-    st = strouhals[3]
+    θ = θs[2]
+    h = hs[2]
+    st = strouhals[1]
     f,a = fna[(θ,h, st)]
     test = deepcopy(defaultDict)
     test[:N] = num_samps
-    test[:Nt] = 100
-    test[:Ncycles] = 1
+    test[:Nt] = 32
+    test[:Ncycles] = 5
     test[:f] = f
     test[:Uinf] = 1
     test[:kine] = :make_heave_pitch
 
-    test[:ψ] = -pi/2
+    test[:ψ] = pi/2
     test[:motion_parameters] = [h, θ]
     foil, flow = init_params(; test...)
     wake = Wake(foil)
-    cls = []
-    ct = []
+    cls = zeros(flow.N*flow.Ncycles)
+    cts = zeros(flow.N*flow.Ncycles)
     (foil)(flow)
-    movie = @animate for i in 1:160    
+    movie = @animate for i in 1:flow.N*flow.Ncycles   
+    # for i in 1:flow.N*flow.Ncycles   
         if flow.n != 1
             move_wake!(wake, flow)
             release_vortex!(wake, foil)
@@ -543,25 +619,76 @@ begin
         # cont = reshape([pos foil.normals'  iv' foil.panel_vel' ], (num_samps,2,4,1))
         image = cat(cont|>mp.dev, cat(ν, β, dims=2), dims=3)
         cl,ct,Γ = pNN(image)|>cpu
+        cls[i] = cl
+        cts[i] = ct
         # push!(cls, cl)
         # push!(ct, ct)
         #TODO: CLEAN UP 
-
-        foil.μ_edge[2] = foil.μ_edge[1]
-        foil.μ_edge[1] = Γ
+        # Γ = -Onet(vcat(ν,β), [0 1; 0 0]|>gpu)|>cpu|>first 
+        # @show oG, Γ
+        # Γ /= -2π
+        
+        # add_vortex!(wake, foil, -Γ, foil.edge[:,1])
         # cancel_buffer_Γ!(wake, foil)
         n,t,l = norms(foil.edge)
-        cent  = mean(foil.foil, dims=2)
+        # cent  = mean(foil.foil, dims=2)
+        te = foil.foil[:,end]
         θedge = atan(t[1,2],t[2,2])
-        sten = hcat(rotation(θedge)*wake.xy, stencil_points(rotation(θedge)*wake.xy)).-cent
-        c,px,mx,py,my= de_stencil(Onet(vcat(ν,β), sten|>gpu)')
-        wake.uv = vcat((px - mx)/(2*ϵ),  (py - my)/(2*ϵ))
-        # wake.uv += vortex_to_target(foil.edge[:,1:2], wake.xy,  -[Γ -Γ], flow)
+        # wake.xy[:,1] = foil.foil[:,1]
+        # wake.xy = [wake.xy foil.foil[:,1]]
+        wake.xy[:,1]  = foil.foil[:,1]
+        sten = hcat(rotation(θedge)*(wake.xy.-te), 
+            stencil_points(rotation(θedge)*(wake.xy.-te );ϵ=ϵ)).-[ϵ 0]'
+        c,px,mx,py,my= de_stencil(Onet(vcat(ν,β), sten|>gpu)')        
+        nΓ = (c|>cpu)[1]
+        foil.μ_edge[2] = foil.μ_edge[1]
+        foil.μ_edge[1] = -nΓ
+        # wake.Γ = [wake.Γ..., nΓ]
+        # @show nΓ, Γk
+        # wake.uv = vcat((px - mx)/(2*ϵ),  (py - my)/(2*ϵ))
+        # wake.uv += vortex_to_target(foil.edge[:,1:2], wake.xy,  -[nΓ -nΓ], flow)
         wake_self_vel!(wake, flow)
+        # add_vortex!(wake, foil, -(c|>cpu)[1], foil.edge[:,1])
         plot(foil,wake)
     end
-    gif(movie, "./images/full.gif", fps = 30)
+    gif(movie, "./images/full.gif", fps = test[:Nt]>30 ? 30 : test[:Nt])
     # plot(foil, wake)
+    # plot(cls)
+    # plot!(cts)
+end
+plot(cls)
+plot!(cts)
+function add_vortex!(wake::Wake, foil::Foil, Γ, pos = nothing, v = [0,0])
+    if isnothing(pos)
+        pos = (foil.col[:, 1] + foil.col[:, end])/2.0
+    end        
+    wake.xy = [wake.xy pos]
+    wake.Γ = [wake.Γ..., Γ]
+    # Set all back to zero for the next time step
+    wake.uv = [wake.uv v]
+    nothing
 end
 
+n,t,l = norms(foil.edge)
+te  = foil.foil[:,end]
+θ = atan(t[:,2]...)
 
+xs = foil.foil[1,:]
+ys = foil.foil[2,:] 
+X = repeat(xs, 1, length(ys))[:]
+Y = repeat(ys',length(xs),1)[:]
+
+points = (rotation(θ) *  ([xs'; ys'].- te) )
+plot(points[1,:], points[2,:], seriestype = :scatter)
+
+
+
+plot(foil)
+plot!(foil,st=:scatter)
+be = 7#num_samps - 1 
+stride  = 7
+plot!(foil2.foil[1,pts], foil2.foil[2,pts], seriestype = :scatter)
+plot!(foil2.foil[1,32+be-1:be:end], foil2.foil[2,32+be-1:be:end], seriestype = :scatter)
+plot!(foil2.foil[1,be:be:end], foil2.foil[2,be:be:end], seriestype = :scatter)
+
+pts = collect(vcat(be:stride:32,32+be-1:stride:64))

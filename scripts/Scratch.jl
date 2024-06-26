@@ -3,17 +3,22 @@ using Puffer
 
 using Plots
 
+θ = θs[2]
+h = hs[2]
+st = strouhals[1]
+f,a = fna[(θ,h, st)]
+f,a = fna[(θ,h, st)]
 heave_pitch = deepcopy(defaultDict)
 heave_pitch[:N] = 100
-heave_pitch[:Nt] = 150
+heave_pitch[:Nt] = 100
 heave_pitch[:Ncycles] = 3
 heave_pitch[:f] = 1.0
 heave_pitch[:Uinf] = 1
 heave_pitch[:kine] = :make_heave_pitch
-heave_pitch[:ψ]=0.0
-θ0 = -0.0#deg2rad(5)
+heave_pitch[:ψ] = -pi/2
+# θ0 = -0.0#deg2rad(5)
 h0 = 0.0
-heave_pitch[:motion_parameters] = [h0, θ0]
+heave_pitch[:motion_parameters] = [h, θ]
 
 foil, flow = init_params(; heave_pitch...)
 wake = Wake(foil)
@@ -29,7 +34,7 @@ begin
         plot(foil, wake)            
     end
     gif(movie, "./images/handp.gif", fps = 30)
-    plot(foil, wake)
+    # plot(foil, wake)
 end
 
 

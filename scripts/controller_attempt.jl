@@ -420,3 +420,138 @@ RHS|>size
 μs|>size
 perfs|>size
 P|>size
+
+
+
+
+  #these add the latent spaces to the image/sampled space
+if size(controller,3) == 4
+    latim = permutedims(cat(latentdata.data.νs, latentdata.data.βs, dims=3), (1,3,2));
+    latim = reshape(latim, (size(latim)[1:2]...,1, size(latim,3)));
+    latim = cat(controller|>mp.dev, latim, dims=3);
+end
+
+pndata = DataLoader((images = latim, perfs = latentdata.data.perfs, μs = latentdata.data.μs, P =dataloader.data.P ), batchsize=mp.batchsize*2, shuffle=true)
+pNN = Chain(Conv((4,2), 5=>5, Flux.tanh, pad = SamePad()),            
+            Conv((2,2), 5=>2,  pad = SamePad()),
+            Flux.flatten,   
+            #TODO: 32 is a magic number!
+            Dense(mp.layers[end]*4,mp.layers[1],Flux.tanh),
+            SkipConnection(Chain(Dense(mp.layers[1],mp.layers[1],Flux.tanh),
+                                Dense(mp.layers[1],mp.layers[1])),+),
+            Dense(mp.layers[1],mp.layers[end],Flux.tanh),
+            Dense(mp.layers[end],3))|>mp.dev  
+
+pNNstate = Flux.setup(ADAM(mp.η), pNN)
+
+plosses = []
+for epoch = 1:mp.epochs
+    for (ims, perf, μs, P) in pndata
+        ims = ims |> mp.dev 
+        P = P |> mp.dev       
+        lift = perf[2,:] |> mp.dev
+        thrust = perf[3,:] |> mp.dev
+        Γs = μs |> mp.dev
+        Γs = Γs[1,:] - Γs[end,:]
+        pls = 0.0
+        grads = Flux.gradient(pNN) do m
+            phat = m[1:4](ims)
+            pls = errorL2(m[5].layers(phat), P) #match pressure inside the network
+            y = m(ims)
+
+            pls += errorL2(y[2,:], thrust)#thrust
+            pls += errorL2(y[1,:], lift) #lift
+            pls += errorL2(y[3,:], Γs)
+            # ls = errorL2(y[:], Γs)             
+            
+        end
+        Flux.update!(pNNstate, pNN, grads[1])
+        push!(plosses, pls)  # logging, outside gradient context
+    end
+    if epoch %  (mp.epochs /10) == 0
+        println("Epoch: $epoch, Loss: $(plosses[end])")
+    end
+end
+plosses
+begin
+    wh= rand(1:252)
+    @show string(motions[wh])
+    slice = ns*(wh-1)+1:ns*(wh)
+    perfs = latentdata.data.perfs
+    lift = perfs[2,:] 
+    thrust = perfs[3,:] 
+    pres  = pNN[5].layers(pNN[1:4](pndata.data.images|>gpu))|>cpu
+    Γs = latentdata.data.μs 
+    Γs = Γs[1,:] - Γs[end,:]
+    P = dataloader.data.P
+        
+    y = pNN(pndata.data.images|>gpu)|>cpu
+    plot(lift[slice], lw=4,label="lift")
+    a = plot!(y[1,slice], lw = 0, marker=:circle, label="model")
+    title!(string(motions[wh]))
+    # title!("h: $(round(h, digits=2)), θ: $(round(θ|>rad2deg, digits=1)|>Int), St: $(round(St, digits=2))")
+    plot(thrust[slice], lw=4,label="thrust")
+    b = plot!(y[2,slice], lw = 0, marker=:circle, label="model")
+    plot(Γs[slice], lw=4,label="Γ")
+    c = plot!(y[3,slice], lw = 0, marker=:circle,
+    label="model")
+    d = plot(P[:,slice], label="pressure",st=:contourf)
+    title!("P")
+    e = plot(pres[:,slice], label="model",st=:contourf)
+    title!("model")
+    f = plot(d,e, layout = (1,2))
+
+    g = plot(a,b,c,f, layout = (4,1), size = (1200,1000))
+end
+
+
+
+
+#just pressure
+pnn = Chain(Conv((4,2), 5=>5, Flux.tanh, pad = SamePad()),            
+            Conv((2,2), 5=>4,  pad = SamePad()),            
+            Flux.flatten,               
+            Dense(mp.layers[end]*8,mp.layers[1],Flux.tanh),
+            Dense(mp.layers[1],mp.layers[1],Flux.tanh),
+            Dense(mp.layers[1],mp.layers[1]))|>mp.dev  
+pnn(ims[:,:,:,1:4]|>mp.dev)
+pnnstate = Flux.setup(ADAM(mp.η), pnn)
+
+plosses = []
+for epoch = 1:mp.epochs
+    for (ims, _,_, P) in pndata
+        ims = ims |> mp.dev 
+        P = P |> mp.dev       
+
+        pls = 0.0
+        grads = Flux.gradient(pnn) do m
+            phat = m(ims)
+            pls = errorL2(phat, P) #match pressure inside the network            
+        end
+        Flux.update!(pnnstate, pnn, grads[1])
+        push!(plosses, pls)  # logging, outside gradient context
+    end
+    if epoch %  (mp.epochs /10) == 0
+        println("Epoch: $epoch, Loss: $(plosses[end])")
+    end
+end
+plosses
+begin
+    wh= rand(1:200)
+    @show string(motions[wh])
+    slice = ns*(wh-1)+1:ns*(wh)
+    
+    pres  = pnn(pndata.data.images|>gpu)|>cpu
+    P = dataloader.data.P[:,slice]
+    clims = extrema(P)
+
+    @show errorL2(pres[:,slice], P)    
+    d = plot(P, label="pressure",st=:contourf, clims=clims)
+    title!("P")
+    e = plot(pres[:,slice], label="model",st=:contourf, clims=clims)
+    title!("model")
+    f = plot(d,e, layout = (1,2),size = (1200,800))
+
+    
+    
+end

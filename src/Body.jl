@@ -204,7 +204,7 @@ function set_collocation!(foil::Foil, S = 0.005)
 end
 
 rotation(α) = [cos(α) -sin(α)
-    sin(α) cos(α)]
+              sin(α) cos(α)]
 
 function next_foil_pos(foil::Foil, flow::FlowParams)
     #TODO: rework for self propelled swimming

@@ -477,7 +477,7 @@ function sampled_motion(motions, inputs; num_samps=8, nT=500)
         slice = nT*(j-1)+1:nT*j 
         #induced_velocities from input images
         #TODO: this is a hack to get the induced velocities; remember the input values are circular pads
-        ivs = inputs[stride:stride:end,:,3,slice]    
+        ivs = inputs[stride÷2+1:stride:end,:,3,slice]    
         
         for i = 1:nT
             (foil)(flow)
