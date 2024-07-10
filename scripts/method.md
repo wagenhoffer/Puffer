@@ -54,3 +54,5 @@ dataloader, motions = build_dataloaders(mp; data_file=hp_file, coeffs_file=hp_co
 - Creates a DataLoader for efficient data feeding during training.
 - Returns `motions` object with swimmer movement information.
 
+ϵ = sqrt(eps(Float32))
+field

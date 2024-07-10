@@ -476,8 +476,11 @@ function sampled_motion(motions, inputs; num_samps=8, nT=500)
         image = []
         slice = nT*(j-1)+1:nT*j 
         #induced_velocities from input images
-        #TODO: this is a hack to get the induced velocities; remember the input values are circular pads
-        ivs = inputs[stride÷2+1:stride:end,:,3,slice]    
+        #TODO: this is a hack to get the induced velocities;only works for        
+        # ivs = inputs[stride÷2+1:stride:end,:,3,slice]    
+        be = stride -1
+        pts = collect(vcat(be:be:32,32+be-1:be:64))
+        ivs = inputs[pts,:,3,slice]  
         
         for i = 1:nT
             (foil)(flow)
@@ -530,7 +533,7 @@ function upconverter_pressure_networks(latentdata, controller, P, RHS, mp)
         latim = cat(controller|>mp.dev, latim, dims=3);
     end
 
-    pndata = DataLoader((images = latim, perfs = latentdata.data.perfs, μs = latentdata.data.μs, P = P ), batchsize=mp.batchsize, shuffle=true)
+    pndata = DataLoader((images = latim, perfs = latentdata.data.perfs, μs = latentdata.data.μs, P = dataloader.data.P ), batchsize=mp.batchsize, shuffle=true)
     pNN = Chain(Conv((4,2), 5=>5, Flux.tanh, pad = SamePad()),            
                 Conv((2,2), 5=>2,  pad = SamePad()),
                 Flux.flatten,   
@@ -544,7 +547,7 @@ function upconverter_pressure_networks(latentdata, controller, P, RHS, mp)
     pNNstate = Flux.setup(ADAM(mp.η), pNN)
 
     plosses = []
-    for epoch = 1:mp.epochs
+    for epoch = 1:mp.epochs*8
         for (ims, perf, μs, P) in pndata
             ims = ims |> mp.dev 
             P = P |> mp.dev       
@@ -558,10 +561,10 @@ function upconverter_pressure_networks(latentdata, controller, P, RHS, mp)
                 pls = errorL2(m[5].layers(phat), P) #match pressure inside the network
                 y = m(ims)
     
-                pls += errorL2(y[2,:], thrust)#thrust
-                pls += errorL2(y[1,:], lift) #lift
+                pls += errorL2(y[2,:], thrust)*10#thrust
+                pls += errorL2(y[1,:], lift)*10 #lift
                 pls += errorL2(y[3,:], Γs)
-                # ls = errorL2(y[:], Γs)             
+                
                 
             end
             Flux.update!(pNNstate, pNN, grads[1])

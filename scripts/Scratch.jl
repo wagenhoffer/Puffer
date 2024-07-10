@@ -3,21 +3,23 @@ using Puffer
 
 using Plots
 
-θ = θs[2]
-h = hs[2]
-st = strouhals[1]
-f,a = fna[(θ,h, st)]
-f,a = fna[(θ,h, st)]
+index = 42
+motion = motions[index]
+
+
+θ = motion[4]
+h = motion[3]
+st = motion[5]
 heave_pitch = deepcopy(defaultDict)
-heave_pitch[:N] = 100
+heave_pitch[:N] = 64
 heave_pitch[:Nt] = 100
-heave_pitch[:Ncycles] = 3
-heave_pitch[:f] = 1.0
+heave_pitch[:Ncycles] = 6
+heave_pitch[:f] = f
 heave_pitch[:Uinf] = 1
 heave_pitch[:kine] = :make_heave_pitch
 heave_pitch[:ψ] = -pi/2
 # θ0 = -0.0#deg2rad(5)
-h0 = 0.0
+# h0 = 0.0
 heave_pitch[:motion_parameters] = [h, θ]
 
 foil, flow = init_params(; heave_pitch...)
@@ -642,3 +644,111 @@ c = plot((magP-magΓ)', st = :contour, levels = 50, color = :viridis, aspect_rat
 plot(a,b,c, layout = (1,3), size = (1000, 400))
 plot(e, d, f, layout = (1,3), size = (1200, 400))
 end
+
+
+
+begin
+    T = Float32
+    ϵ = sqrt(eps(T))
+    strouhals = LinRange{T}(0.2, 0.4, 7)
+    td = LinRange{Int}(0, 10, 6)
+    θs = deg2rad.(td).|> T    
+    hs = LinRange{T}(0.0, 0.25, 6)
+    # f,a = fna[(θ, h, strou)]
+    num_samps = 8
+
+    G = inv(L|>cpu)|>gpu
+    begin
+        # for h in hs[1:end], θ in θs[2:end], st in strouhals[1:end]
+            (θ,h, st) = fna.keys[1]
+            f,a = fna[(θ,h, st)]
+            test = deepcopy(defaultDict)
+            test[:N] = 64
+            test[:Nt] = 100
+            test[:Ncycles] = 1
+            test[:f] = f
+            test[:Uinf] = 1
+            test[:kine] = :make_heave_pitch
+
+            test[:ψ] = -pi/2
+            test[:motion_parameters] = [h, θ]
+            foil, flow = init_params(; test...)
+            wake = Wake(foil)
+            test[:N] = num_samps
+            test[:T] = Float32
+            foil2, _ = init_params(; test...)
+            (foil)(flow)
+            (foil2)(flow)
+            flow.n -= 1
+
+            ### EXAMPLE OF AN ANIMATION LOOP
+            # movie = @animate for i in 1:200
+            for i = 1:200
+                rhs = time_increment!(flow, foil, wake)
+                # Nice steady window for plotting        
+                # push!(vels, deepcopy(foil.panel_vel))
+                (foil2)(flow)
+                flow.n -= 1
+                points = zeros(2,100)
+                
+                sf = sample_field(foil::Foil)                   
+                n,t,l = norms(foil.edge)
+                # cent  = mean(foil.foil, dims=2)
+                te = foil.foil[:,end]
+                θedge = atan(t[:,2]...) 
+                # sf = wake.xy[:, randperm(size(wake.xy, 2))[1:100]]
+                sp = stencil_points(sf;ϵ=ϵ)
+                points = sf #.+ foil.edge[:,end] .+flow.Δt
+                test = hcat(sf,sp)
+                phi = phi_field(test,foil)
+                (ori, xp, xm, yp, ym) = de_stencil(phi')
+                if sum((-4*ori + xp + xm + yp + ym) .> ϵ) >1
+                    println("Error in stencil")
+                end
+                uv = rotation(-θedge)*b2f(points, foil, flow)
+                
+                get_panel_vels!(foil2,flow)
+                # vortex_to_target(sources, targets, Γs, flow)   
+                pos = deepcopy(foil2.col')
+                zeropos = deepcopy(foil2.col') .- minimum(pos,dims=1).*[1 0]
+                # pos[:,1] .+= minimum(pos[:,1])
+                # @show errorL2(dx,points[1,:]' .- pos[:,1])
+                iv = vortex_to_target(wake.xy, foil2.col, wake.Γ, flow)
+                be = 7
+                pts = collect(vcat(be:be:32,32+be-1:be:64))
+                iv2 = vortex_to_target(wake.xy, foil.col[:,pts], wake.Γ, flow)
+
+                cont = reshape([zeropos foil2.normals'  iv' foil2.panel_vel' ], (num_samps,2,4,1))
+
+                β = B_DNN.layers[2](upconv(cont|>gpu))
+                # B = B_DNN.layers[2:3](upconv(cont|>gpu))|>cpu
+                # excont = vcat(cont[end-1:end,:,:,:],cont,cont[1:2,:,:,:])
+                # β1 = B_DNN.layers[1:2](excont|>gpu)
+                # B1 = B_DNN.layers[1:3](excont|>gpu)|>cpu
+                ν = G*β
+            
+                # errorL2(μAE[:decoder](ν)|>cpu, foil.μs)
+                cont = reshape([pos foil2.normals'  iv' foil2.panel_vel' ], (num_samps,2,4))
+                image = cat(cont|>mp.dev, cat(ν, β, dims=2), dims=3)
+
+                # image = cat(cont|>mp.dev, cat(foil.μs, foil.σs   , dims=2), dims=3)
+                
+                plot(foil, wake)   
+                # plot!(points[1,:], points[2,:], seriestype = :scatter)                         
+            end
+            gif(movie, "./images/full.gif", fps = 30)
+            # plot(foil, wake)
+        end
+    end
+
+
+fst, lst = foil.panel_lengths[1],foil.panel_lengths[end]
+sigf, sigl = foil.σs[1],foil.σs[end]
+μf, μl = foil.μs[1],foil.μs[end]
+spot =( sigf*log(fst/2) + sigl*log(lst/2))/2π
+
+
+wake.xy[:,1]  = foil.foil[:,1]
+sten = hcat(rotation(θedge)*(wake.xy.-te), 
+    stencil_points(rotation(θedge)*(wake.xy.-te );ϵ=ϵ)) .+[foil.chord 0]'
+c,px,mx,py,my= de_stencil(Onet(vcat(ν,β), sten|>gpu)')   

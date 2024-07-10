@@ -1,4 +1,6 @@
 include("Deep_Green.jl")
+include("hnp_nlsolve_strou.jl")
+
 layers = [[64, 32, 16, 8]]
 # layers = [[64,64,64,64]]
 
