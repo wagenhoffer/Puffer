@@ -59,14 +59,14 @@ end
 @time begin
     num_foils = 2
     # starting_positions = [2.0 1.0 1.0 0.0; 0.0 1.0 -1.0 0.0]
-    starting_positions = [0.0 1.5 ; 0.0 0.0 ]
+    starting_positions = [0.0 0.0 ; -1.0 1.0 ]
     phases = [pi/2, -pi/2]
     θ0 = deg2rad(10)
     h0 = 0.1
     motion_parameters = [h0 θ0 ; -h0 θ0]
 
     foils, flow = create_foils(num_foils, starting_positions, :make_heave_pitch;
-             motion_parameters=motion_parameters, ψ=phases, Ncycles = 5, Nt = 64, kine=[:make_heave_pitch, :make_heave_pitch]);
+             motion_parameters=motion_parameters, ψ=phases, Ncycles = 1, Nt = 64, kine=[:make_heave_pitch, :make_heave_pitch]);
     wake = Wake(foils)
     @show [foil.f for foil in foils]
     (foils)(flow)
@@ -78,13 +78,27 @@ end
     coeffs = zeros(length(foils), 4, steps)
     time_increment!(flow, foils, wake)
 
-    for t in 2:steps
+    movie = @animate for t in 2:steps
         time_increment!(flow, foils, wake; mask=[false, true])    
         xlims = foils[2].foil[1,1] .+ (-0.25, 0.25)
         ylims = foils[2].foil[2,1] .+ (-0.5, 0.25)
-        # plot(foils, wake)#; xlims=xlims, ylims=ylims)
+        plot(foils, wake)#; xlims=xlims, ylims=ylims)
     end
-    # gif(movie, "newMulti.gif", fps = 30)
+    gif(movie, "newMulti.gif", fps = 30)
+end
+
+begin
+    num_foils = 2
+    # starting_positions = [2.0 1.0 1.0 0.0; 0.0 1.0 -1.0 0.0]
+    starting_positions = [0.0 -0.0 ; -1.10 1.10 ]
+    phases = [pi/2, -pi/2]
+    θ0 = deg2rad(10)
+    h0 = 0.1
+    motion_parameters = [h0 θ0 ; -h0 θ0]
+
+    foils, flow = create_foils(num_foils, starting_positions, :make_heave_pitch;
+             motion_parameters=motion_parameters, ψ=phases, Ncycles = 1, Nt = 64, kine=[:make_heave_pitch, :make_heave_pitch]);
+    plot(foils)
 end
 
 begin

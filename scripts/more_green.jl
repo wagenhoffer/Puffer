@@ -15,38 +15,39 @@ begin
     # hp_coeff = ""
 
     layer = layers |> first
-    mp = ModelParams(layer, 0.001, 500, 4096, errorL2, gpu)
+    mp = ModelParams(layer, 0.001, 1000, 4096, errorL2, gpu)
     layerstr = join(["$(layer)->" for layer in mp.layers])[1:end-2]
 
     bAE, μAE, convNN, perfNN = build_networks(mp)
     μstate, bstate, convNNstate, perfNNstate = build_states(mp, bAE, μAE, convNN, perfNN)
     B_DNN = build_BDNN(convNN, bAE, mp)
-    dataloader,motions = build_dataloaders(mp, data_file=hp_file, coeffs_file=hp_coeff)
-    # dataloader, motions = build_dataloaders(mp)
+    # dataloader,motions = build_dataloaders(mp, data_file=hp_file, coeffs_file=hp_coeff)
+    dataloader, motions = build_dataloaders(mp)
     #load previous state
     load_AEs(; μ=prefix * "μAE_L$(layerstr).jld2", bdnn=prefix * "B_DNN_L$(layerstr).jld2")
     L, Lstate, latentdata = build_L_with_data(mp, dataloader, μAE, B_DNN)
     load_L(; l=prefix * "L_L$(layerstr).jld2")
     @show "Train Pressure nets and controllers"
-    controller = sampled_motion(motions, dataloader.data.inputs[3:end-2, :, :, :]; num_samps=layer[end], nT=500)
-    upconv, upstate, pNN, pNNstate, losses, plosses, pndata = upconverter_pressure_networks(latentdata, controller, dataloader.data.P, dataloader.data.RHS, mp)
+    # controller = sampled_motion(motions, dataloader.data.inputs[3:end-2, :, :, :]; num_samps=layer[end], nT=500)
+    # upconv, upstate, pNN, pNNstate, losses, plosses, pndata = upconverter_pressure_networks(latentdata, controller, dataloader.data.P, dataloader.data.RHS, mp)
 
 end
 
 ##TRAINING LOOP##
 for layer in layers
     @show layer
-    prefix = "a0hnp_"
-    hp_file = "a0_single_swimmer_thetas_0_10_h_0.0_0.25_fs_0.2_0.4_h_p.jls"
-    hp_coeff = "a0_single_swimmer_coeffs_thetas_0_10_h_0.0_0.25_fs_0.2_0.4_h_p.jls"
-    # prefix="wave"
+    # prefix = "a0hnp_"
     # hp_file = "a0_single_swimmer_thetas_0_10_h_0.0_0.25_fs_0.2_0.4_h_p.jls"
     # hp_coeff = "a0_single_swimmer_coeffs_thetas_0_10_h_0.0_0.25_fs_0.2_0.4_h_p.jls"
 
+    # prefix="wave"
+    # hp_file = "a0_single_swimmer_thetas_0_10_h_0.0_0.25_fs_0.2_0.4_h_p.jls"
+    # hp_coeff = "a0_single_swimmer_coeffs_thetas_0_10_h_0.0_0.25_fs_0.2_0.4_h_p.jls"
+    # prefix="images"
     mp = ModelParams(layer, 0.001, 1000, 4096, errorL2, gpu)
     bAE, μAE, convNN, perfNN = build_networks(mp)
     μstate, bstate, convNNstate, perfNNstate = build_states(mp, bAE, μAE, convNN, perfNN)
-    dataloader, motions = build_dataloaders(mp; data_file=hp_file, coeffs_file=hp_coeff)
+    # dataloader, motions = build_dataloaders(mp; data_file=hp_file, coeffs_file=hp_coeff)
     @show "Train Conv and AEs"
     B_DNN, (convNNlosses, μlosses, blosses) = train_AEs(dataloader, convNN, convNNstate, μAE, μstate, bAE, bstate, mp; ϵ=1e-4)
     @show "Train L"
@@ -79,4 +80,5 @@ for layer in layers
     plot_controller(wh=nothing; prefix=prefix, name="Random")
 
 end
+
 

@@ -140,15 +140,15 @@ begin
                 counter +=1
                 # Set motion parameters
                 starting_positions = [0.0  0.0 ; -δ δ ]
-                phases = [pi/2, pi/2,pi/2, pi/2]    
+                phases = [pi/2, -pi/2,pi/2, pi/2]    
                 fs     = [ reduced_freq, -reduced_freq]
-                ks     = [ -k, k]
+                ks     = [ k, -k]
                 
                 motion_parameters = [a0 for i in 1:num_foils]
             
                 foils, flow = create_foils(num_foils, starting_positions, :make_wave;
                         motion_parameters=motion_parameters, ψ=phases, Ncycles = 5,
-                        k= ks,  Nt = 64, f = fs);
+                        k= ks,  Nt = 100, f = fs);
                 
                 wake = Wake(foils)
                 
@@ -164,7 +164,7 @@ begin
                 ps = zeros(totalN)
                     
                 
-                @time for i in 1:steps
+               for i in 1:steps
                     rhs = time_increment!(flow, foils, wake)
 
                 
@@ -200,18 +200,21 @@ begin
                                         pressure     = [ps],
                                         RHS          = [rhs]                        
                                         )        
-                    if i == flow.N
+                    if i == 1
                         datas = vals
-                    elseif i > flow.N
+                    else
                         append!(datas, vals)
                     end
-
-                    # plot(foils, wake)
+                    # if i>10
+                    #     plot(foils, wake)
+                    # else
+                    #     plot(foils)
+                    # end
                 end
                 # file = "d_$(@sprintf("%.2f", δ))_f_$(reduced_freq)_k_$(k).gif"
                 # path = joinpath("images","gfx_images", file)
                 # gif(movie, path, fps = 30)
-                coeff_df = DataFrame(δ = [δ], reduced_freq = [reduced_freq], k = [k], coeffs = [coeffs[:,:,flow.N:end]])
+                coeff_df = DataFrame(δ = [δ], reduced_freq = [reduced_freq], k = [k], coeffs = [coeffs])
                                 
                 push!(allCoeffs, coeff_df)
                 push!(allofit, datas)
@@ -253,7 +256,7 @@ begin
         for k in k_values
             for δ in δs
                 for ψi in ψs
-                    # @show counter, reduced_freq, k, δ , ψi
+                    @show counter, reduced_freq, k, δ , ψi
                     counter +=1
                     # Set motion parameters
                     starting_positions = [0.0  δ; 0.0 0.0 ]
@@ -264,7 +267,7 @@ begin
                     motion_parameters = [a0 for i in 1:num_foils]
                 
                     foils, flow = create_foils(num_foils, starting_positions, :make_wave;
-                            motion_parameters=motion_parameters, ψ=phases, Ncycles = 6,
+                            motion_parameters=motion_parameters, ψ=phases, Ncycles = 5,
                             k= ks,  Nt = 100, f = fs);
                     
                     wake = Wake(foils)
@@ -298,8 +301,8 @@ begin
                             μs[((j - 1) * foil.N + 1):(j * foil.N)] = foil.μs
                             coeffs[j, :, i ] .= get_performance(foil, flow, p)
                         end
-                        old_mus = [μs'; old_mus[1:2, :]]
-                        old_phis =     k_values = LinRange{T}(0.35, 2.0, 5)[phis'; old_phis[1:2, :]]
+                        old_mus  = [μs'; old_mus[1:2, :]]
+                        old_phis = [phis'; old_phis[1:2, :]]
                         
                         
                         vals = DataFrame( δ = [δ],
@@ -317,9 +320,9 @@ begin
                                             pressure     = [ps],
                                             RHS          = [rhs]                        
                                             )        
-                        if i == flow.N
+                        if i == 1
                             datas = vals
-                        elseif i > flow.N
+                        else#if i > flow.N
                             append!(datas, vals)
                         end
 
@@ -328,7 +331,7 @@ begin
                     # file = "d_$(@sprintf("%.2f", δ))_f_$(reduced_freq)_k_$(k).gif"
                     # path = joinpath("images","gfx_images", file)
                     # gif(movie, path, fps = 30)
-                    coeff_df = DataFrame(δ = [δ], reduced_freq = [reduced_freq], k = [k], coeffs = [coeffs[:,:,flow.N:end]])
+                    coeff_df = DataFrame(δ = [δ], reduced_freq = [reduced_freq], k = [k], coeffs = [coeffs[:,:,:]])
                         
                     push!(allCoeffs, coeff_df)
                     push!(allofit, datas)
@@ -376,6 +379,7 @@ begin
                     for ψi in ψs
                         counter +=1
                         # Set motion parameters
+                        @show counter, reduced_freq, k, δx, δy, ψi
                         starting_positions = [0.0  δy; δx 0.0; 0.0 -δy; -δx 0.0]'
                         phases = [0, ψi, 0, ψi].|>mod2pi
                         fs = [reduced_freq for _ in 1:num_foils]
@@ -383,7 +387,7 @@ begin
                         motion_parameters = [a0 for _ in 1:num_foils]
 
                         foils, flow = create_foils(num_foils, starting_positions, :make_wave;
-                            motion_parameters=motion_parameters, ψ=phases, Ncycles = 8,
+                            motion_parameters=motion_parameters, ψ=phases, Ncycles = 5,
                             k= ks,  Nt = 100, f = fs);
 
                             wake = Wake(foils)                    
@@ -399,15 +403,8 @@ begin
                             ps = zeros(totalN)
                                 
         
-                            @time for i in 1:steps
-                            # (foils)(flow)
-                            # movie = @animate for i in 1:steps
-                            #     rhs = time_increment!(flow, foils, wake)
-                            #     plot(foils, wake)
-                            # end
-                            # gif(movie, "test.gif", fps = 30)
-        
-                                
+                            for i in 1:steps                            
+                                rhs = time_increment!(flow, foils, wake)
                                 for (j, foil) in enumerate(foils)        
                                     phi = get_phi(foil, wake)
                                     phis[((j - 1) * foil.N + 1):(j * foil.N)] = phi
@@ -441,9 +438,9 @@ begin
                                                     pressure     = [ps],
                                                     RHS          = [rhs]                        
                                                     )        
-                                if i == flow.N
+                                if i == 1#flow.N
                                     datas = vals
-                                elseif i > flow.N
+                                else#if i > flow.N
                                     append!(datas, vals)
                                 end
         
@@ -453,7 +450,7 @@ begin
                             # path = joinpath("images","gfx_images", file)
                             # gif(movie, path, fps = 30)
                             # coeff_df = DataFrame(δ = [δ], reduced_freq = [reduced_freq], k = [k], coeffs = [coeffs[:,:,flow.N:end]])
-                            coeff_df = DataFrame(δx = [δx], δy = [δy], reduced_freq = [reduced_freq], k = [k], ψi=[ψi], coeffs = [coeffs[:,:,flow.N:end]])
+                            coeff_df = DataFrame(δx = [δx], δy = [δy], reduced_freq = [reduced_freq], k = [k], ψi=[ψi], coeffs = [coeffs[:,:,:]])
                                 
                             push!(allCoeffs, coeff_df)
                             push!(allofit, datas)

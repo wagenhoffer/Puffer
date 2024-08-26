@@ -83,7 +83,55 @@ function build_dataloaders(mp::ModelParams; data_file="single_swimmer_ks_0.35_2.
     dataloader = DataLoader((inputs=inputs, RHS=RHS, μs=μs, perfs=perfs, P=P), batchsize=mp.batchsize, shuffle=true)    
     dataloader, motions
 end
+function build_dataloaders_multi(mp::ModelParams; data_file="single_swimmer_ks_0.35_2.0_fs_0.25_4.0_ang_car.jls", coeffs_file= "single_swimmer_coeffs_ks_0.35_2.0_fs_0.25_4.0_ang_car.jls")
+    # load/ prep  training data
+    data = deserialize(joinpath("data", data_file))
+    coeffs = deserialize(joinpath("data", coeffs_file))
+   
+    RHS = hcat(data[:, :RHS]...).|>Float32
+    μs  = hcat(data[:, :μs]...).|>Float32
+    P   = vcat(data[:, :pressure]...)'.|>Float32
+  
+    N = mp.layers[1]
+    cnt = size(RHS,2)
+    pad = 2
+    inputs = zeros(Float32, N + pad*2, 2, 4, cnt)
+    
+    i = 1
+    for row in eachrow(data)  
+        position        = row.position 
+        position[1,:] .-= minimum(position[1,:] , dims=1) 
+    
+        x_in = [position' row.normals' row.wake_ind_vel' row.panel_vel' ]    
+        x_in = vcat(x_in[end-pad+1:end,:,:,:],x_in,x_in[1:pad,:,:,:])
+        x_in = reshape(x_in, size(x_in,1), 2, size(x_in, 2) ÷ 2, 1) #shape the data to look like channels
+        inputs[:,:,:,i] = x_in
+        i += 1
+    end
 
+
+    perfs = zeros(4, cnt)
+    ns = coeffs[1,:coeffs]|>size|>last
+    i = 1
+    motions = []
+    if "Strouhal" in names(coeffs)
+        for r in eachrow(coeffs)        
+            perfs[:,ns*(i-1)+1:ns*i] = r.coeffs
+            f,a = fna[(r.θ, r.h, r.Strouhal)]
+            push!(motions, (:make_heave_pitch, f, r.h, r.θ , r.Strouhal))
+            i += 1
+        end
+    else
+        for r in eachrow(coeffs)        
+            perfs[:,ns*(i-1)+1:ns*i] = r.coeffs
+            push!(motions, (r.wave,r.reduced_freq,r.k))
+            i += 1        
+        end
+    end
+    
+    dataloader = DataLoader((inputs=inputs, RHS=RHS, μs=μs, perfs=perfs, P=P), batchsize=mp.batchsize, shuffle=true)    
+    dataloader, motions
+end
 # W, H, C, Samples = size(dataloader.data.inputs)
 function build_networks(mp; C = 4, N = 64)
     convenc = Chain(Conv((4,2), C=>C, Flux.tanh, pad=SamePad()),                
@@ -547,7 +595,7 @@ function upconverter_pressure_networks(latentdata, controller, P, RHS, mp)
     pNNstate = Flux.setup(ADAM(mp.η), pNN)
 
     plosses = []
-    for epoch = 1:mp.epochs*8
+    for epoch = 1:mp.epochs*4
         for (ims, perf, μs, P) in pndata
             ims = ims |> mp.dev 
             P = P |> mp.dev       
