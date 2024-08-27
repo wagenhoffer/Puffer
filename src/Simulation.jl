@@ -178,22 +178,25 @@ function time_increment!(flow::FlowParams{T}, foils::Vector{Foil{T}}, wake::Wake
     
     σs = zeros(totalN)
     buff = zeros(totalN)
+    buff_self = zeros(totalN)
+    
     for (i, foil) in enumerate(foils)
         foil.wake_ind_vel = vortex_to_target(wake.xy, foil.col, wake.Γ, flow)
         normal_wake_ind = sum(foil.wake_ind_vel .* foil.normals, dims = 1)'
         foil.σs -= normal_wake_ind[:]
         σs[((i - 1) * foil.N + 1):(i * foil.N)] = foil.σs
         buff += (edge_body[:, i] * foil.μ_edge[1])
+        buff_self[(i-1)*foil.N+1:(i)*foil.N] += (edge_body[(i-1)*foil.N+1:(i)*foil.N, i] * foil.μ_edge[1])
     end
-    rhs = (-rhs * σs - buff)
-    μs = A \ rhs
+    RHS = (-rhs * σs - buff)
+    μs = A \ RHS
     for (i, foil) in enumerate(foils)
         foil.μs = μs[((i - 1) * foil.N + 1):(i * foil.N)]
     end
     set_edge_strength!.(foils)    
     [body_to_wake!(wake, foil, flow) for foil in foils]
     wake_self_vel!(wake, flow)
-    rhs
+    (-rhs * σs - buff_self)
 end
 
 function get_phi(foil::Foil, wake::Wake)
