@@ -14,3 +14,5 @@ data/*.jld2
 #coverage files
 *.cov
 *.info
+papers/
+data/
