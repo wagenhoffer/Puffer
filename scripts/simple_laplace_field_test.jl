@@ -1,422 +1,425 @@
-#simple deeponet test
-using Flux
-using CUDA
+using LinearAlgebra
 using Plots
 
-function normv(x, y)
-    dxdy = hcat([(x - circshift(x, 1)) / 2, (y - circshift(y, 1)) / 2]...)'
-    lens = sqrt.(sum(dxdy .^ 2, dims=1))
-    tans = dxdy ./ lens
-    return hcat([tans[2, :], -tans[1, :]]...)'
+# Define the circle
+struct Circle
+    center::Vector{Float64}
+    radius::Float64
 end
-function circle(n)
-    x = [cos(2π * i / n) for i in 1:n]
-    y = [sin(2π * i / n) for i in 1:n]
-    return x, y
-end
-function phi_field(field, body, σs, μs)
-    x1, x2, y = panels_frame(field, body)
-    phid = zeros(size(x1))
-    phis = zeros(size(x1))
-    @. phis= x1*log(x1^2 + y^2) - x2*log(x2^2 + y^2) + 2*y*(atan(y, x2) - atan(y, x1)) 
-    @. phid = (atan(y, x2) - atan(y, x1))
-    phis * σs / 4π - phid * μs / 2π
-end
-function ∇Φ(field, body, normals, σs, μs)
-    x1, x2, y = panels_frame(field, body)
-    nw, nb = size(x1)
-    lexp = zeros((nw, nb))
-    texp = zeros((nw, nb))
-    yc = zeros((nw, nb))
-    xc = zeros((nw, nb))
-    β = atan.(-normals[1, :], normals[2, :])
-    β = repeat(β, 1, nw)'
-    # doublets    
-    @. lexp = -(y / (x1^2 + y^2) - y / (x2^2 + y^2)) / 2π
-    @. texp = (x1 / (x1^2 + y^2) - x2 / (x2^2 + y^2)) / 2π
-    @. xc = lexp * cos(β) - texp * sin(β)
-    @. yc = lexp * sin(β) + texp * cos(β)
-    uv = [xc * μs yc * μs]'
-    # sources
-    @. lexp = log((x1^2 + y^2) / (x2^2 + y^2)) / (4π)
-    @. texp = (atan(y, x2) - atan(y, x1)) / (2π)
-    @. xc = lexp * cos(β) - texp * sin(β)
-    @. yc = lexp * sin(β) + texp * cos(β)
-    uv += [xc * σs yc * σs]'
-end
-function panels_frame(target, source)
-    Ns = size(source, 2)
-    Nt = size(target, 2)
-    Ns -= 1 #start/end at same location
-    x1 = zeros(Ns, Nt)
-    x2 = zeros(Ns, Nt)
-    y = zeros(Ns, Nt)
-    ns = normv(source[1, :], source[2, :])[:,2:end]
-    ts = hcat(ns[2,:], -ns[1,:])'
-    txMat = repeat(ts[1, :]', Nt, 1)
-    tyMat = repeat(ts[2, :]', Nt, 1)
-    dx = repeat(target[1, :], 1, Ns) - repeat(source[1, 1:(end - 1)]', Nt, 1)
-    dy = repeat(target[2, :], 1, Ns) - repeat(source[2, 1:(end - 1)]', Nt, 1)
-    x1 = dx .* txMat + dy .* tyMat
-    y = -dx .* tyMat + dy .* txMat
-    x2 = x1 - repeat(sum(diff(source, dims = 2) .* ts, dims = 1), Nt, 1)
-    x1, x2, y
-end
-function stencil_points(points; ϵ=sqrt(eps(Float32)))
-    xp = deepcopy(points)
-    xp[1,:] .+= ϵ
-    xm = deepcopy(points)
-    xm[1,:] .-= ϵ
-    yp = deepcopy(points)
-    yp[2,:] .+= ϵ
-    ym = deepcopy(points)
-    ym[2,:] .-= ϵ
-    (xp, xm, yp, ym)
-end
-c.σs
-#TODO: bust into spatial param and values
-mutable struct Circle    
-    normals::Matrix{Float64}
-    body::Matrix{Float64}    
-    coll::Matrix{Float64}
-    σs::Vector{Float64}
-    μs::Vector{Float64}
 
-    function Circle(n)
-        x,y = circle(n)
-        normals = normv(x, y)
-        body = [x... x[1]; y... y[1]]
-        σs = rand(-10:0.1:10).*circshift(sin.(LinRange(rand(0:pi/64:pi/2), rand(1:8)*pi, n)).+rand(n).-0.5, rand(1:n))
-        μs = rand(-10:0.1:10).*circshift(sin.(LinRange(rand(0:pi/64:pi/2), rand(1:8)*pi, n)).+rand(n).-0.5,rand(1:n))
-        new(normals, body, collocation(body), σs, μs)
+# Define the boundary element
+struct BoundaryElement
+    node1::Vector{Float64}
+    node2::Vector{Float64}
+    circle_index::Int
+end
+
+# Generate boundary elements for multiple circles
+function generate_boundary_elements(circles::Vector{Circle}, n_elements_per_circle::Int)
+    elements = BoundaryElement[]
+    for (circle_index, circle) in enumerate(circles)
+        for i in 1:n_elements_per_circle
+            θ1 = 2π * (i - 1) / n_elements_per_circle
+            θ2 = 2π * i / n_elements_per_circle
+            node1 = circle.center + circle.radius * [cos(θ1), sin(θ1)]
+            node2 = circle.center + circle.radius * [cos(θ2), sin(θ2)]
+            push!(elements, BoundaryElement(node1, node2, circle_index))
+        end
     end
-end
-collocation(b::Circle) = collocation(b.body)
-collocation(b::Matrix) = (b[:,2:end]+b[:,1:end-1])/2
-
-function source_inf(x1, x2, z)
-    (x1 * log(x1^2 + z^2) - x2 * log(x2^2 + z^2) - 2 * (x1 - x2) +
-     2 * z * (mod2pi(atan(z, x2)) - mod2pi(atan(z, x1)))) / (4π)
+    return elements
 end
 
-doublet_inf(x1, x2, z) = -(mod2pi(atan(z, x2)) - mod2pi(atan(z, x1))) / (2π)
+# Define the boundary condition (example: cosine variation)
+function boundary_condition(θ::Float64, circle_index::Int)
+    return cos(θ + circle_index * π/4)  # Different phase for each circle
+end
 
-function make_infs(bodies::Vector{Circle}; ϵ = 1e-10)
-    nbodies = length(bodies)
-    Ns = [size(body.coll,2) for body in bodies]    
-    N = sum(Ns)
-    Ns = [0 cumsum(Ns)...]
+# Compute the influence coefficient for external problem
+function influence_coefficient(x::Vector{Float64}, element::BoundaryElement)
+    r1 = x - element.node1
+    r2 = x - element.node2
+    L = norm(element.node2 - element.node1)
+    return -1/(2π) * (log(norm(r2)) - log(norm(r1))) * L
+end
 
-    allcols = hcat([collocation(f) for f in bodies]...)
-
-    doubletMat = zeros(N, N)
-    sourceMat = zeros(N, N)
+# Assemble the system matrix and right-hand side vector
+function assemble_system(elements::Vector{BoundaryElement}, bc=boundary_condition)
+    n = length(elements)
+    A = zeros(n, n)
+    b = zeros(n)
     
-    for j = 1:nbodies
-        x1, x2, y = panels_frame(allcols, bodies[j].body)
-        ymask = abs.(y) .> ϵ
-        y = y .* ymask
-        doubletMat[:, (Ns[j] + 1):Ns[j + 1]] = doublet_inf.(x1, x2,y)
-        sourceMat[:, (Ns[j] + 1):Ns[j + 1]]  = source_inf.(x1, x2, y)            
+    for i in 1:n
+        x_mid = 0.5 * (elements[i].node1 + elements[i].node2)
+        θ = atan(x_mid[2] - elements[i].node1[2], x_mid[1] - elements[i].node1[1])
+        b[i] = bc(θ, elements[i].circle_index)
+        
+        for j in 1:n
+            if i != j
+                A[i, j] = influence_coefficient(x_mid, elements[j])
+            else
+                A[i, i] = -0.5
+            end
+        end
     end
-  
-    doubletMat, sourceMat
+    
+    return A, b
 end
 
-XS = []
-YS = []        
-for (i,r) in enumerate(1.5:0.25:5)
-    X, Y = circle(10 + 2*(i-1)) .* r            
-    push!(XS, X)
-    push!(YS, Y)        
+# Solve the boundary integral equation
+function solve_laplacian_bem(circles::Vector{Circle}, n_elements_per_circle::Int,bc=boundary_condition)
+    elements = generate_boundary_elements(circles, n_elements_per_circle)
+    A, b = assemble_system(elements,bc)
+    solution = A \ b
+    elements, solution, b
 end
-field = vcat(vcat(XS...)', vcat(YS...)')
 
-incident_wave(x, y, α, k, δ) = exp(im * (k * ((x - δ)* cos(α) + y * sin(α)))) 
-incident_wave(body,α, k, δ ) = incident_wave.(body[1,:], body[2,:], α, k, δ)
-i_x(body, α, k, δ) = im*k*cos(α)*incident_wave(body, α, k, δ)
-i_y(body, α, k, δ) = im*k*sin(α)*incident_wave(body, α, k, δ)
-xs = -π:0.1:π
-ys = -π:0.1:π
-X = repeat(xs, 1, length(ys))
-Y = repeat(ys', length(xs), 1)sourceMat[:, (Ns[j] + 1):Ns[j + 1]]  = source_inf.(x1, x2, y)
+# Function to compute potential at a point
+function compute_potential(x::Vector{Float64}, elements::Vector{BoundaryElement}, solution::Vector{Float64})
+    potential = 0.0
+    for (i, element) in enumerate(elements)
+        potential += solution[i] * influence_coefficient(x, element)
+    end
+    return potential
+end
 
-ns = collect(xs)|>size|>first
-field = vcat([[x y] for x in xs, y in ys]...)'
-α = π/4  # angle of incidence
-k = 1  # wave number
+# Check if a point is inside any circle
+function is_inside_any_circle(x::Vector{Float64}, circles::Vector{Circle})
+    for circle in circles
+        if norm(x - circle.center) < circle.radius
+            return true
+        end
+    end
+    false
+end
 
-i_field = incident_wave.(field[1, :], field[2, :], α, k, 0.25)
-vx = i_x(field, α, k, 0.25)
-vy = i_y(field, α, k, 0.25)
-plot(xs, ys, reshape(i_field, (ns,ns))|>real, aspect_ratio=:equal, c=:coolwarm, st=:contourf)
-quiver!(Y,X, quiver=(reshape(vx|>real, (ns,ns)), reshape(vy|>real, (ns,ns))))
+# Interpolate solution on a grid
+function interpolate_solution(elements, solution, grid_size, circles)
+    x_min, x_max = extrema(hcat(extrema([circle.center[1] .+ [-2, 2].*circle.radius for circle in circles])...))
+    y_min, y_max = extrema(hcat(extrema([circle.center[2] .+ [-2, 2].*circle.radius for circle in circles])...))
+    
+    x = range(x_min, x_max, length=grid_size)
+    y = range(y_min, y_max, length=grid_size)
+    z = zeros(grid_size, grid_size)
+
+    for i in 1:grid_size
+        for j in 1:grid_size
+            point = [x[i], y[j]]
+            if !is_inside_any_circle(point, circles)
+                z[j, i] = compute_potential(point, elements, solution)
+            else
+                z[j, i] = NaN  # Set points inside any circle to NaN
+            end
+        end
+    end
+
+    x, y, z
+end
+
+#EXAMPLE OF SEVERAL CIRCLES
+# Define multiple circles
+circles = [
+    Circle([0.0, 0.0], 1.0),   # Unit circle at origin
+    Circle([3.0, 0.0], 0.8),   # Smaller circle to the right
+    Circle([-1.5, 2.0], 1.2)   # Larger circle to the top-left
+]
+n_elements_per_circle = 100
+grid_size = 300
+
+elements, solution, b = solve_laplacian_bem(circles, n_elements_per_circle)
+
+# Interpolate solution on a grid
+x, y, z = interpolate_solution(elements, solution, grid_size, circles)
+
+# Create the plot
+p = contourf(x, y, z, 
+                color=:viridis, 
+                linewidth=0,
+                title="External Laplacian Field around Multiple Circles",
+                xlabel="x",
+                ylabel="y",
+                aspect_ratio=:equal,
+                size=(1000, 800))
+
+# Add circle outlines
+for (i, circle) in enumerate(circles)
+    θ = range(0, 2π, length=100)
+    circle_x = circle.center[1] .+ circle.radius * cos.(θ)
+    
+end
+   
+using LinearAlgebra
+using Plots
+
+# Define the circle
+struct Circle
+    center::Vector{Float64}
+    radius::Float64
+end
+
+# Define the boundary element
+struct BoundaryElement
+    node1::Vector{Float64}
+    node2::Vector{Float64}
+    circle_index::Int
+end
+
+# Generate boundary elements for multiple circles
+function generate_boundary_elements(circles::Vector{Circle}, n_elements_per_circle::Int)
+    elements = BoundaryElement[]
+    for (circle_index, circle) in enumerate(circles)
+        for i in 1:n_elements_per_circle
+            θ1 = 2π * (i - 1) / n_elements_per_circle
+            θ2 = 2π * i / n_elements_per_circle
+            node1 = circle.center + circle.radius * [cos(θ1), sin(θ1)]
+            node2 = circle.center + circle.radius * [cos(θ2), sin(θ2)]
+            push!(elements, BoundaryElement(node1, node2, circle_index))
+        end
+    end
+    return elements
+end
+
+# Define the boundary condition (example: cosine variation)
+function boundary_condition(θ::Float64, circle_index::Int)
+    return cos(θ + circle_index * π/4)  # Different phase for each circle
+end
+
+# Compute the influence coefficient for external problem
+function influence_coefficient(x::Vector{Float64}, element::BoundaryElement)
+    r1 = x - element.node1
+    r2 = x - element.node2
+    L = norm(element.node2 - element.node1)
+    return -1/(2π) * (log(norm(r2)) - log(norm(r1))) * L
+end
+
+# Assemble the system matrix and right-hand side vector
+function assemble_system(elements::Vector{BoundaryElement}, bc=boundary_condition)
+    n = length(elements)
+    A = zeros(n, n)
+    b = zeros(n)
+    
+    for i in 1:n
+        x_mid = 0.5 * (elements[i].node1 + elements[i].node2)
+        θ = atan(x_mid[2] - elements[i].node1[2], x_mid[1] - elements[i].node1[1])
+        b[i] = bc(θ, elements[i].circle_index)
+        
+        for j in 1:n
+            if i != j
+                A[i, j] = influence_coefficient(x_mid, elements[j])
+            else
+                A[i, i] = -0.5
+            end
+        end
+    end
+    
+    return A, b
+end
+
+# Solve the boundary integral equation
+function solve_laplacian_bem(circles::Vector{Circle}, n_elements_per_circle::Int,bc=boundary_condition)
+    elements = generate_boundary_elements(circles, n_elements_per_circle)
+    A, b = assemble_system(elements,bc)
+    solution = A \ b
+    elements, solution, b
+end
+
+# Function to compute potential at a point
+function compute_potential(x::Vector{Float64}, elements::Vector{BoundaryElement}, solution::Vector{Float64})
+    potential = 0.0
+    for (i, element) in enumerate(elements)
+        potential += solution[i] * influence_coefficient(x, element)
+    end
+    return potential
+end
+
+# Check if a point is inside any circle
+function is_inside_any_circle(x::Vector{Float64}, circles::Vector{Circle})
+    for circle in circles
+        if norm(x - circle.center) < circle.radius
+            return true
+        end
+    end
+    false
+end
+
+# Interpolate solution on a grid
+function interpolate_solution(elements, solution, grid_size, circles)
+    x_min, x_max = extrema(hcat(extrema([circle.center[1] .+ [-2, 2].*circle.radius for circle in circles])...))
+    y_min, y_max = extrema(hcat(extrema([circle.center[2] .+ [-2, 2].*circle.radius for circle in circles])...))
+    
+    x = range(x_min, x_max, length=grid_size)
+    y = range(y_min, y_max, length=grid_size)
+    z = zeros(grid_size, grid_size)
+
+    for i in 1:grid_size
+        for j in 1:grid_size
+            point = [x[i], y[j]]
+            if !is_inside_any_circle(point, circles)
+                z[j, i] = compute_potential(point, elements, solution)
+            else
+                z[j, i] = NaN  # Set points inside any circle to NaN
+            end
+        end
+    end
+
+    x, y, z
+end
+
+#EXAMPLE OF SEVERAL CIRCLES
+# Define multiple circles
+circles = [
+    Circle([0.0, 0.0], 1.0),   # Unit circle at origin
+    Circle([3.0, 0.0], 0.8),   # Smaller circle to the right
+    Circle([-1.5, 2.0], 1.2)   # Larger circle to the top-left
+]
+n_elements_per_circle = 100
+grid_size = 300
+
+elements, solution, b = solve_laplacian_bem(circles, n_elements_per_circle)
+
+# Interpolate solution on a grid
+x, y, z = interpolate_solution(elements, solution, grid_size, circles)
+
+# Create the plot
+p = contourf(x, y, z, 
+                color=:viridis, 
+                linewidth=0,
+                title="External Laplacian Field around Multiple Circles",
+                xlabel="x",
+                ylabel="y",
+                aspect_ratio=:equal,
+                size=(1000, 800))
+
+# Add circle outlines
+for (i, circle) in enumerate(circles)
+    θ = range(0, 2π, length=100)
+    circle_x = circle.center[1] .+ circle.radius * cos.(θ)
+    circle_y = circle.center[2] .+ circle.radius * sin.(θ)
+    plot!(p, circle_x, circle_y, color=:white, linewidth=2, label="Circle $i")
+end
+
+# Show the plot
+p
+
+#START PARAMETERIZATION OF A SINGLE CIRCLE WITH A INCREASING SERIES BOUNDARY CONDITION
+# Define a single circle
+circle = Circle([0.0, 0.0], 1.0)
+n_elements_per_circle = 100
+grid_size = 300
+boundary_condition(θ::Float64) = boundary_condition(θ::Float64, 1) 
+
+macro generate_bc(a, b, c, d)
+    quote
+        (θ, i) -> $a * sin($b * θ) + $c * cos($d * θ)
+    end
+end
 
 
-circle(2) #warmup
-ks = 0.1:0.1:10
-αs = 0:π/16:π/2
-δs = 0:0.1:1
-Circles = []
-for k in ks
-    for α in αs
-        for δ in δs
-            c = Circle(64)
-            c.normals  = circshift(c.normals, (0,-1))
-            c.σs =     real(i_x(c.coll, α, k, δ).*c.normals[1,:] .+ i_y(c.coll, α, k, δ).*c.normals[2,:])
-            A,B = make_infs([c])
-            c.μs = A\(B*c.σs)
-            push!(Circles, deepcopy(c))
+
+
+# Example usage of the macro
+
+ass = collect(0:0.4:2π)[2:end]
+css = collect(0:0.4:2π)[2:end]
+bss = collect(1:5)
+dss = collect(0:5)
+total_parameters = length(ass) * length(bss) * length(css) * length(dss)
+# Iterate over the boundary conditions and solve the BEM for each
+
+i = 1
+xs = zeros(n_elements_per_circle, total_parameters)
+bs = zeros(n_elements_per_circle, total_parameters)
+@time for a in a_s
+    for b in bs
+        for c in cs 
+            for d in ds
+                # @show a, b, c, d
+                bc(θ, ii) =   a * sin(b * θ) + c * cos(d * θ)
+                elements, solution, B = solve_laplacian_bem([circle], n_elements_per_circle,bc )
+                xs[:, i] = solution
+                bs[:, i] = B
+                i += 1
+            end
         end
     end
 end
 
-gf = field|>gpu
-phis = phis 
-noise = rand(size(phis)...)./20 .|>Float32  #5% noise
-dl = Flux.DataLoader((phis = phis.|>gpu, μs = μs.|>gpu, us = us.|>gpu,
-                      vs = vs.|>gpu, σs= σs.|>gpu, noise = noise.|>gpu), 
-                    batchsize = 2048, shuffle = true)
+#Setup a simple NN and train it 
+using Flux
+using Flux: DataLoader
+using CUDA 
 
-# simple DeepOnet
-trunk  = Chain(Dense(2,  32, Flux.tanh),
-               Dense(32, 32, Flux.tanh),
-               Dense(32, 32, Flux.tanh))|>gpu
-branch = Chain(Dense(16,  32, Flux.tanh),
-               Dense(32, 32, Flux.tanh),
-               Dense(32, 32, Flux.tanh))|>gpu
+dataloader = DataLoader((xs = xs.|>Float32, bs = bs.|>Float32), batchsize = 1024, shuffle = true)
 
+x_ae = Chain(enc = Chain(Dense(100,50, tanh), 
+             Dense(50, 25, tanh), 
+             Dense(25,8)), 
+             dec = Chain(Dense(8,25, tanh),
+             Dense(25, 50, tanh), 
+             Dense(50, 100)))|>gpu
+b_ae = deepcopy(x_ae)             
 
-trunk(field|>gpu)
-branch(vcat(μs,σs)|>gpu)
-
-deepO = Parallel((x,y)->permutedims(x'*y,(2,1)), branch, trunk)|>gpu
-deepO(map(gpu,(vcat(μs,σs),field)))
-
-
-ostate = Flux.setup(Adam(0.001), deepO)
-
-loss2(m,x,y) = Flux.mse(m(x),y)/Flux.mse(y, zeros(size(y)))
-loss2(x,y) = Flux.mse(x,y)/Flux.mse(y, zeros(size(y))|>gpu)
-
-# Purely data driven training
-ϕlosses = []
-for i=1:50
-    for (phif, mub,_,_,sigb, noise) in dl
-        phif = phif|>gpu
-        noise = noise|>gpu
-        phif .+= noise
-        mub  = mub|>gpu
-        sigb = sigb|>gpu
-        mub = vcat(mub,sigb)
-        loss = 0.0
-        grads = Flux.gradient(deepO) do m            
-            out   = m((mub,gf))            
-            loss = loss2(out, phif)
+errorL2(x, y) = Flux.mse(x,y)/Flux.mse(y, 0.0) 
+losses = []
+bstate = Flux.setup(Adam(0.001), b_ae)
+for epoch = 1:1_000
+    for (x,b) in dataloader        
+        b = b |> gpu     
+        ls = 0.0
+        grads = Flux.gradient(b_ae) do m        
+            
+            ls = errorL2(m(b), b)              
+            
         end
-        Flux.update!(ostate, deepO, grads[1])
-    
-        push!(ϕlosses, loss)
+        Flux.update!(bstate, b_ae, grads[1])
+        push!(losses, ls)  # logging, outside gradient context        
     end
-    if i%10 == 0
-        println("Epoch: $i, Loss: $(ϕlosses[end])")
-    end    
-end    
-
-
-
-begin
-    choose = rand(1:size(circles,1))
-    acircle = circles[choose]
-    danoise = dl.data.noise[:,choose]
-    φ = deepO((vcat(acircle.μs,acircle.σs)|>gpu,gf)) |> cpu
-    δϕ = φ.-acircle.ϕ0
-    clims = extrema(acircle.ϕ0)
-    a = scatter(field[1,:], field[2,:],aspect_ratio=:equal, ms=5,markerstrokewidth=0,clims=clims, marker_z =φ,    st=:scatter, c=:coolwarm, label="model")
-    b = scatter(field[1,:], field[2,:],aspect_ratio=:equal, ms=5,markerstrokewidth=0,clims=clims, marker_z= acircle.ϕ0, st=:scatter, c=:coolwarm, label="truth")
-    c = scatter(field[1,:], field[2,:],aspect_ratio=:equal, ms=5,markerstrokewidth=0, marker_z= δϕ, st=:scatter, c=:coolwarm, label="Δϕ")
-    d = scatter(field[1,:], field[2,:],aspect_ratio=:equal, ms=5,markerstrokewidth=0, marker_z= danoise, st=:scatter, c=:coolwarm, label="noise")
-    e = plot(a,b, layout =(1,2), size=(900,400))   
-    f = plot(c,d, layout =(1,2), size=(900,400))
-    @show err = Flux.mse(φ, acircle.ϕ0)/Flux.mse(acircle.ϕ0, zeros(size(acircle.ϕ0)))
-    title!("L_2 error: $(err)")
-    
-    plot(e, f,layout=(2,1), size=(900,800))
+    if epoch % 100 == 0
+        println("Epoch $epoch, Loss: $(losses[end])")
+    end
 end
-
-# contour(field[1,:], field[2,:], φ,aspect_ratio=:equal, c=:coolwarm)
-
-
-ostate = Flux.setup(Adam(0.001), deepO)
-
-loss2(m,x,y) = Flux.mse(m(x),y)/Flux.mse(y, zeros(size(y)))
-loss2(x,y) = Flux.mse(x,y)/Flux.mse(y, zeros(size(y))|>gpu)
-
-# ϵ = cbrt(eps(Float32))
-(xp, xm, yp, ym)  = stencil_points(field;ϵ=ϵ)
-(gxp, gxm, gyp, gym) = map(gpu, (xp, xm, yp, ym))
-ϕlosses = []
-for i=1:500
-    for (phif, mub, us, vs,sigb,noise) in dl
-        phif = phif|>gpu
-        noise = noise|>gpu
-        # phif .+= noise
-        mub  = mub|>gpu
-        sigb = sigb|>gpu
-        mub = vcat(mub,sigb)
-        us   = us|>gpu
-        vs   = vs|>gpu
-
-        loss = 0.0
-        grads = Flux.gradient(deepO) do m            
-            out = m((mub,gf))
-            plx = m((mub,gxp))
-            mlx = m((mub,gxm))
-            ply = m((mub,gyp))
-            mly = m((mub,gym))
-            um  = (plx - mlx)/2ϵ
-            vm  = (ply - mly)/2ϵ
-            Δϕ = (-4*out .+ plx .+ mlx .+ ply .+ mly)/ϵ^2
-            loss = Flux.mse(Δϕ, 0.0)            
-            loss += loss2(out, phif)*10
-            loss += loss2(um, us)
-            loss += loss2(vm, vs)
-
+xstate = Flux.setup(Adam(0.001), x_ae)
+for epoch = 1:1_000
+    for (x,b) in dataloader        
+        x = x |> gpu     
+        ls = 0.0
+        grads = Flux.gradient(x_ae) do m        
+            
+            ls = errorL2(m(x), x)              
+            
         end
-        Flux.update!(ostate, deepO, grads[1])
-    
-        push!(ϕlosses, loss)
+        Flux.update!(xstate, x_ae, grads[1])
+        push!(losses, ls)  # logging, outside gradient context        
     end
-    if i%10 == 0
-        println("Epoch: $i, Loss: $(ϕlosses[end])")
-    end    
-end    
-
-
-
-
-begin
-    # ϵ = cbrt(eps(Float32))
-    (xp, xm, yp, ym)  = stencil_points(field;ϵ=ϵ)
-    (gxp, gxm, gyp, gym) = map(gpu, (xp, xm, yp, ym))
-    #see if this can be used to learn the velocity field
-    acircle = rand(circles)
-    φ   = deepO((vcat(acircle.μs,acircle.σs)|>gpu,gf)) |> cpu 
-    φpx = deepO((vcat(acircle.μs,acircle.σs)|>gpu,gxp)) |> cpu 
-    φmx = deepO((vcat(acircle.μs,acircle.σs)|>gpu,gxm)) |> cpu 
-    φpy = deepO((vcat(acircle.μs,acircle.σs)|>gpu,gyp)) |> cpu 
-    φmy = deepO((vcat(acircle.μs,acircle.σs)|>gpu,gym)) |> cpu 
-    Δϕ = (-4*φ .+ φpx .+ φmx .+ φpy .+ φmy)/ϵ^2
-    @show Flux.mse(Δϕ,0.0)
-    u = (φpx -φmx)/2ϵ
-    v = (φpy -φmy)/2ϵ
-    scl = [√2 √2] #[norm(u,2) norm(v,2)]
-    modelc = mod2pi.(atan.(v,u))./2pi
-    @show Flux.mse(acircle.∇Φ[1,:], u)/Flux.mse(acircle.∇Φ[1,:], zeros(size(acircle.∇Φ[1,:])))
-    @show Flux.mse(acircle.∇Φ[2,:], v)/Flux.mse(acircle.∇Φ[2,:], zeros(size(acircle.∇Φ[2,:])))
-
-    px  = phi_field(xp, acircle.body, acircle.σs, acircle.μs)
-    mx  = phi_field(xm, acircle.body, acircle.σs, acircle.μs)
-    py  = phi_field(yp, acircle.body, acircle.σs, acircle.μs)
-    my  = phi_field(ym, acircle.body, acircle.σs, acircle.μs)
-    us = (px - mx) /2ϵ
-    vs = (px - mx) /2ϵ
-
-    quiver(field[1,:] , field[2,:], quiver=(u./scl[1],v./scl[2]), aspect_ratio=:equal, c=:red, lw=2, label="model")
-    quiver!(field[1,:], field[2,:], quiver=(acircle.∇Φ[1,:]./scl[1],acircle.∇Φ[2,:]./scl[2]), aspect_ratio=:equal, c=:blue, lw=2, label="truth")
-    # quiver!(field[1,:], field[2,:], quiver=(us./scl[1],vs./scl[2]), aspect_ratio=:equal, c=:green, lw=2, label="stencil")
-    # quiver!(field[1,:].+15, field[2,:], quiver=(u.-acircle.∇Φ[1,:],v.-acircle.∇Φ[2,:]), aspect_ratio=:equal, c=:green, lw=2, label="Δv")
-end
-begin
-    plot(φ, label="Deep")
-    plot!(acircle.ϕ0, label="Truth")
-    plot!(phi_field(field, acircle.body, acircle.σs, acircle.μs), label="Stencil")
-end
-
-
-#verification of the process : ∇^2ϕ = 0 and [u,v] = ∇ϕ(px,mx,py,my) = stencil_points(field;ϵ=ϵ)
-
-thiscircle = circles[42]
-
-ori = phi_field(field, thiscircle.body, thiscircle.σs, thiscircle.μs)
-px  = phi_field(xp, thiscircle.body, thiscircle.σs, thiscircle.μs)
-mx  = phi_field(xm, thiscircle.body, thiscircle.σs, thiscircle.μs)
-py  = phi_field(yp, thiscircle.body, thiscircle.σs, thiscircle.μs)
-my  = phi_field(ym, thiscircle.body, thiscircle.σs, thiscircle.μs)
-φpx = deepO((vcat(thiscircle.μs,thiscircle.σs)|>gpu,gxp)) |> cpu 
-φmx = deepO((vcat(thiscircle.μs,thiscircle.σs)|>gpu,gxm)) |> cpu
-φpy = deepO((vcat(thiscircle.μs,thiscircle.σs)|>gpu,gyp)) |> cpu
-φmy = deepO((vcat(thiscircle.μs,thiscircle.σs)|>gpu,gym)) |> cpu
-
-Δϕ = (-4*ori .+ px .+ mx .+ py .+ my)/ϵ^2
-extrema(Δϕ)
-√sum(abs2, Δϕ)
-this∇Φ = ∇Φ(field, thiscircle.body, thiscircle.normals, thiscircle.σs, thiscircle.μs)
-stenuv = [ (px - mx) (py - my)]'/2ϵ
-# sten2  = [ (px - ori)/ϵ (py - ori)/ϵ]'
-guv    = [(φpx - φmx) (φpy - φmy)]'/2ϵ
-thiscircle.∇Φ
-
-plot(guv[1,:], label="Deep")
-plot!(stenuv[1,:], label="Stencil")
-p1 = plot!(this∇Φ[1,:], label="Truth")
-
-plot(guv[2,:], label="Deep")
-plot!(stenuv[2,:], label="Stencil")
-p2 = plot!(this∇Φ[2,:], label="Truth")
-
-plot(p1,p2, layout=(2,1), size=(900,800))
-
-quiver(field[1,:] , field[2,:], quiver=(stenuv[:,1],stenuv[:,2]), aspect_ratio=:equal, c=:red, lw=2, label="model")
-quiver!(field[1,:] , field[2,:], quiver=(thiscircle.∇Φ[1,:],thiscircle.∇Φ[2,:]), aspect_ratio=:equal, c=:blue, lw=2, label="truth")
-
-
-α = -π/4
-x = 0.0
-y = 1.0
-mu = 1.0
-
-phi_anal(x,y) = -mu/2π*(x*cos(α) + y*sin(α))/(x^2 + y^2)
-u_anal(x,y)   = mu/2π*(x^2*cos(α) - y^2*cos(α) + 2*x*y*sin(α))/(x^2 + y^2)^2
-v_anal(x,y)   = mu/2π*(y^2*sin(α) - x^2*sin(α) + 2*x*y*cos(α))/(x^2 + y^2)^2
-ϵ = sqrt(eps(Float32))
-ppx(x,y) = phi_anal(x.+ϵ, y)
-pmx(x,y) = phi_anal(x.-ϵ, y)
-ppy(x,y) = phi_anal(x,   y.+ϵ)
-pmy(x,y) = phi_anal(x,   y.-ϵ)
-
-usten(x,y) = (ppx(x,y) - pmx(x,y))/2ϵ
-vsten(x,y) = (ppy(x,y) - pmy(x,y))/2ϵ
-
-usten(x,y)
-vsten(x,y)
-u_anal(x,y)
-v_anal(x,y)
-
-nxs = 11
-nys = 15
-xs = LinRange(-10,10,nxs)
-ys = LinRange(-5,5,nys)
-Xs = repeat(xs,  1,  nys)
-Ys = repeat(ys', nxs, 1)
-errs = zeros(2,nxs,nys)
-phif = zeros(nxs,nys)
-velf = zeros(2,nxs,nys)
-for (i,x) in enumerate(xs) 
-    for (j,y) in enumerate(ys)
-        errs[1, i, j] = loss2(usten(x,y), u_anal(x,y))
-        errs[2, i, j] = loss2(vsten(x,y), v_anal(x,y))
-        phif[i,j] = phi_anal(x,y)
-        velf[1,i,j] = u_anal(x,y)
-        velf[2,i,j] = v_anal(x,y)
+    if epoch % 100 == 0
+        println("Epoch $epoch, Loss: $(losses[end])")
     end
 end
-#clean the NaNs
-errs[isnan.(errs)] .= 0
-
-a = plot(xs,ys, errs[1,:,:]', st=:contourf, color=:coolwarm)
-b = plot(xs,ys, errs[2,:,:]', st=:contourf, color=:coolwarm)
-c = plot(xs,ys, phif', st=:contourf, color=:coolwarm)
-d =  quiver(Xs, Ys, quiver=(velf[1,:,:],velf[2,:,:]))
-plot(a,b, layout=(2,1), size=(900,800))
-extrema(errs)
+β = b_ae[1](bs|>gpu)|>gpu
+ξ = x_ae[1](xs|>gpu)|>gpu
+loader = DataLoader((ξ = ξ.|>Float32, β = β.|>Float32, xs = xs.|>Float32, bs = bs.|>Float32),
+                     batchsize = 1024, shuffle = true)
+L = rand(Float32, 8,8)|>gpu
+Lstate = Flux.setup(Adam(0.001), L)|>gpu
+losses = []
+for epoch = 1:1_000
+    for (ξ, β, xs, bs) in loader
+        ξ = ξ |> gpu
+        β = β |> gpu
+        xs = xs |> gpu
+        bs = bs |> gpu
+        ls = 0.0
+        grads = Flux.gradient(L) do m
+            Lξ = m*ξ
+            Gβ = m\β
+            ls  = errorL2(Lξ, β)
+            ls += errorL2(b_ae[2](Lξ), bs)
+            ls += errorL2(x_ae[2](Gβ), xs)
+             
+        end
+        Flux.update!(Lstate, L, grads[1])
+        push!(losses, ls)  # logging, outside gradient context
+    end
+    if epoch % 100 == 0
+        println("Epoch $epoch, Loss: $(losses[end])")
+    end
+end
